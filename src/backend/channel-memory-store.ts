@@ -45,10 +45,14 @@ export class ChannelMemoryStore extends MemoryStore {
     return { ...memory, channelId };
   }
 
-  /** `channel_forget_memory` names the text, not an id: the model never sees a memory id. */
+  /**
+   * `channel_forget_memory` names the text, not an id: the model never sees a memory id. Match
+   * case-insensitively, since a model or user retypes the fact from memory rather than copying it
+   * verbatim.
+   */
   deleteByText(channelId: string, text: string): boolean {
-    const target = text.trim();
-    const memory = this.list(channelId).find((entry) => entry.text === target);
+    const target = text.trim().toLowerCase();
+    const memory = this.list(channelId).find((entry) => entry.text.toLowerCase() === target);
     return memory ? this.delete(channelId, memory.id) : false;
   }
 }
