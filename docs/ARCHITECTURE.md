@@ -16,7 +16,7 @@ packages/
   contracts/         Process and network boundary types, limits, and pure validation
   i18n/              Message catalogs, translate and format functions for desktop, shared UI and mobile
   logging/           ts-log Logger interface plus the redacting console/file implementation
-  team-client/       Shared team connection, recovery, and WebRTC framing code
+  team-client/       Shared team connection, recovery, WebRTC framing, and Dynamic Island state
   user-errors/       Shared user-facing error messages for desktop and mobile
 remote/
   api/               Bun Signal service for SDP, ICE, ticket checks, and TURN credentials
@@ -1043,8 +1043,9 @@ Solid runtime. Chart colors use OpenBot tokens. Daily tables provide exact acces
 
 ## Agent import
 
-Server Settings > Import moves agents from a `.zip` export into the local host only; a remote host has
-no Import section and no Team API route. The format is `openbot-import.json` plus `agents/<key>/`
+Server Settings > Import moves agents from a `.zip` export into the local host, or into a remote host
+that serves `agent-import-v1` (see [Agent import from a joined server](#agent-import-from-a-joined-server)).
+The format is `openbot-import.json` plus `agents/<key>/`
 folders. `resources/agent-import/grok-bot/SKILL.md` writes it and `src/main/agent-import-manifest.ts`
 reads it; both are a product contract, so add only optional fields and raise `version` for a change
 of meaning. The renderer never names a path: `agent-import:choose` opens the dialog in main, and
@@ -1110,6 +1111,21 @@ thread and ends that thread's provider sessions. The thread, its messages and th
 The next provider session gets a handoff of only the messages after the last marker. The host refuses
 the request while a turn runs or a message waits in the queue. A client without the capability shows
 the marker as its text. Channel execution threads are not reset.
+
+### Agent import from a joined server
+
+`agent-import-v1` lets any member, not only an owner or admin, import a Grok Bot export into the host.
+`POST /v1/agent-import/stage` takes the raw `.zip` (at most 100 MB) and answers the preview without
+avatars, so the preview stays under the 2 MB WebRTC frame limit. `AgentImportService.stageUpload` writes
+the file to `agent-import-uploads/` in the host's user data and keeps it under a token that only the
+caller's member id can apply or discard. One member keeps one export, the host keeps four uploads at
+most, and an upload nobody applies is released after 30 minutes; the folder is cleared on the first
+upload after a restart. `POST /v1/agent-import/apply` takes `{ token, keys, channelKeys, timezone }` and
+answers the new agents by id and name, which the client reads with the agent list. Channels are created
+with the member as the actor. A member never revises a skill already in the host library: the agent
+gets the existing skill and the result warns. `POST /v1/agent-import/discard` releases the token. On
+desktop, main opens the dialog, reads the file and sends it (`agent-import:choose` is server-scoped);
+the web client uses the browser chooser and ships the export skill in its bundle.
 
 ### Skill events
 
@@ -1284,7 +1300,34 @@ reconciliation. The server context menu controls mute for local and remote serve
 `renderer-forwarders.ts` continues to deliver live events for muted servers, but suppresses
 system notifications. Remote notification content uses the source server's agent list. Both
 server mute and per-agent notification settings apply. Unread state is unchanged. Mobile does
-not yet deliver system notifications; mute settings are not synchronized between devices.
+not deliver system notifications; it shows agent state in its Live Activity. Mute settings are not
+synchronized between devices.
+
+## iPhone Live Activity updates
+
+The phone and a host build the same Live Activity view with `@openbot/team-client`:
+`dynamic-island-coordinator.ts` gives the state, and `live-activity-props.ts` turns it into the props
+that the widget shows. While the app runs, `use-live-activity.ts` publishes them itself.
+
+iOS stops the app and its connections in the background. So the phone registers the push token of
+its activity with the active host (`live-activity-push-v1`, `POST /v1/live-activity/registration`),
+with `away: true` when it leaves the foreground. `LiveActivityPushService` in `src/main` keeps the
+registration in memory for that session. While the phone is away, each agent event (at most once a
+second) reads the runtime snapshot of the agents the member can see and the member's read state,
+builds the props, and sends a change. A change of state has priority 10; a change inside a state
+waits 5 seconds and has priority 5. An unchanged state is sent again every 10 minutes, so its stale
+date moves on; a host that sleeps stops this, and the view then shows that it is out of date. An idle
+state ends the activity.
+
+`live-activity-seal.ts` seals the props with keys derived from a secret that the phone makes for
+that host (an HMAC of the phone secret and the server ID). The
+host sends the sealed text to `POST /v2/remote/hosts/:hostId/live-activity` with its machine
+credential. The Worker checks the credential and a per-host rate limit, makes the APNs payload and
+provider token itself, and forwards the request. It stores and logs nothing. The widget cannot load a
+library, so the phone composes its layout with the two widget keys and the App Group folder, and
+`live-activity-open.ts` opens the sealed props with its own SHA-256. Button links that change host
+state carry an HMAC signature, which the app checks with the key of the host that the action goes
+to, so one host cannot sign an action for another.
 
 ## Shared channel chats
 

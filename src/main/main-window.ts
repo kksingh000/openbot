@@ -12,6 +12,7 @@
 import { join } from "node:path";
 import {
   type AgentEvent,
+  type AppVariant,
   type ComputerUseHighlightPlacement,
   IPC_ENDPOINTS,
   LOCAL_SERVER_ID,
@@ -499,12 +500,13 @@ export function showMainWindow(window: BrowserWindow): void {
   presentMainWindow(window, process.platform, () => app.show());
 }
 
-export function loadDynamicIslandRenderer(window: BrowserWindow, display: Display): Promise<void> {
+export function loadDynamicIslandRenderer(window: BrowserWindow, display: Display, variant: AppVariant): Promise<void> {
   const displayMode = display.internal ? "notch" : "island";
   const developmentUrl = process.env.ELECTRON_RENDERER_URL;
   const url = new URL(developmentUrl ?? "openbot-app://app/index.html");
   url.searchParams.set("surface", "dynamic-island");
   url.searchParams.set("display", displayMode);
+  url.searchParams.set("variant", variant);
   const notch = dynamicIslandNotchSizeForDisplay(display);
   if (notch) {
     url.searchParams.set("notch-width", String(notch.width));

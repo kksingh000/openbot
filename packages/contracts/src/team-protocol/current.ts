@@ -3,6 +3,7 @@ import { CHANNEL_DELETE_CAPABILITY } from "../ipc-chat-channels";
 import { MCP_SERVERS_CAPABILITY } from "../ipc-mcp-servers";
 import { STORAGE_CAPABILITY } from "../ipc-storage";
 import { AGENT_ADMIN_CAPABILITY } from "./agent-admin-v1";
+import { AGENT_IMPORT_CAPABILITY } from "./agent-import-v1";
 import { AGENT_INSTALL_CAPABILITY } from "./agent-install-v1";
 import { AGENT_PUBLISH_CAPABILITY } from "./agent-publish-v1";
 import { AGENT_UPDATE_CAPABILITY } from "./agent-update-v1";
@@ -11,6 +12,7 @@ import { TEAM_BROWSER_VIEW_CAPABILITY, TEAM_BROWSER_VIEW_FRAME_POINT_CAPABILITY 
 import { CONTEXT_RESET_CAPABILITY } from "./context-reset-v1";
 import { HOST_ADMIN_CAPABILITY } from "./host-admin-v1";
 import { HOST_UPDATE_CAPABILITY } from "./host-update-v1";
+import { LIVE_ACTIVITY_PUSH_CAPABILITY } from "./live-activity-push-v1";
 import { PROVIDERS_ADMIN_CAPABILITY } from "./providers-v1";
 import { PROVIDERS_RUNTIMES_V2_CAPABILITY } from "./providers-v2";
 import { TEAM_QUEUE_EDIT_CAPABILITY } from "./queue-edit-v1";
@@ -41,6 +43,7 @@ export const TEAM_EML_ATTACHMENTS_CAPABILITY = "eml-attachments";
 export const TEAM_MEMBER_LEAVE_CAPABILITY = "member-leave-v1";
 export {
   AGENT_ADMIN_CAPABILITY,
+  AGENT_IMPORT_CAPABILITY,
   AGENT_INSTALL_CAPABILITY,
   AGENT_PUBLISH_CAPABILITY,
   AGENT_UPDATE_CAPABILITY,
@@ -48,6 +51,7 @@ export {
   CONTEXT_RESET_CAPABILITY,
   HOST_ADMIN_CAPABILITY,
   HOST_UPDATE_CAPABILITY,
+  LIVE_ACTIVITY_PUSH_CAPABILITY,
   MCP_SERVERS_CAPABILITY,
   PROVIDERS_ADMIN_CAPABILITY,
   PROVIDERS_RUNTIMES_V2_CAPABILITY,
@@ -94,7 +98,9 @@ export const TEAM_CURRENT_CAPABILITIES = [
   TEAM_MEMBER_LEAVE_CAPABILITY,
   CONTEXT_RESET_CAPABILITY,
   HOST_UPDATE_CAPABILITY,
+  AGENT_IMPORT_CAPABILITY,
   AGENT_PUBLISH_CAPABILITY,
+  LIVE_ACTIVITY_PUSH_CAPABILITY,
 ] as const;
 
 export type TeamCurrentCapability = (typeof TEAM_CURRENT_CAPABILITIES)[number];

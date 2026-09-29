@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { AGENT_ADMIN_ROUTES } from "./agent-admin-v1";
+import { AGENT_IMPORT_ROUTES } from "./agent-import-v1";
 import { AGENT_INSTALL_ROUTES } from "./agent-install-v1";
 import { AGENT_PUBLISH_ROUTES } from "./agent-publish-v1";
 import { AGENT_UPDATE_ROUTES } from "./agent-update-v1";
 import { CONTEXT_RESET_ROUTES } from "./context-reset-v1";
 import { HOST_ADMIN_ROUTES } from "./host-admin-v1";
 import { HOST_UPDATE_ROUTES, hostRestartEvent } from "./host-update-v1";
+import { LIVE_ACTIVITY_PUSH_ROUTES } from "./live-activity-push-v1";
 import { optionalRouteCodec } from "./optional-routes";
 import { PROVIDERS_ADMIN_ROUTES } from "./providers-v1";
 import { SHARED_TABLES_ROUTES } from "./shared-tables-v1";
@@ -308,5 +310,91 @@ describe("agent-publish-v1", () => {
         routines: [{ ...preview.routines[0], schedule: { kind: "yearly" } }],
       }),
     ).toThrow();
+  });
+});
+
+describe("agent-import-v1", () => {
+  const agent = {
+    key: "research",
+    name: "Research",
+    title: "Analyst",
+    description: "You are research.",
+    skillCount: 1,
+    routineCount: 0,
+    memoryCount: 2,
+    fileCount: 3,
+    fileBytes: 400,
+    nameExists: false,
+  };
+  const preview = {
+    token: "token-1",
+    sourceApp: "grok-bot",
+    exportedAt: null,
+    agents: [agent],
+    channels: [
+      {
+        key: "desk",
+        name: "Desk",
+        title: "",
+        memberKeys: ["research"],
+        leadKey: null,
+        memoryCount: 0,
+        routineCount: 0,
+      },
+    ],
+    warnings: [],
+  };
+
+  it("sends the preview without avatars and the result with only the new agents' ids and names", () => {
+    const withAvatar = { ...preview, agents: [{ ...agent, avatarUrl: "data:image/png;base64,AAAA" }] };
+    expect(codec(AGENT_IMPORT_ROUTES.stage).response(200, withAvatar)).toEqual(preview);
+    const result = {
+      agents: [{ agentId: "a1", name: "Research", workspacePath: "/Users/host/OpenBot/a1" }],
+      skipped: [],
+      channels: [{ id: "c1", name: "Desk" }],
+      skippedChannels: [],
+      warnings: [],
+    };
+    expect(codec(AGENT_IMPORT_ROUTES.apply).response(200, result)).toEqual({
+      ...result,
+      agents: [{ agentId: "a1", name: "Research" }],
+    });
+    const input = { token: "token-1", keys: ["research"], channelKeys: [], timezone: "Europe/Warsaw" };
+    expect(codec(AGENT_IMPORT_ROUTES.apply).request(input)).toEqual(input);
+    expect(codec(AGENT_IMPORT_ROUTES.discard).request({ token: "token-1" })).toEqual({ token: "token-1" });
+  });
+
+  it("rejects malformed payloads", () => {
+    expect(() =>
+      codec(AGENT_IMPORT_ROUTES.stage).response(200, { ...preview, agents: [{ ...agent, key: 1 }] }),
+    ).toThrow();
+    expect(() => codec(AGENT_IMPORT_ROUTES.apply).request({ token: "token-1", keys: ["research"] })).toThrow();
+    expect(() => codec(AGENT_IMPORT_ROUTES.discard).request({})).toThrow();
+  });
+});
+
+describe("live-activity-push-v1", () => {
+  const registration = {
+    serverId: "server-1",
+    token: "ab".repeat(32),
+    environment: "production",
+    secret: "A".repeat(43),
+    locale: "fr",
+    away: true,
+    photos: [{ agentId: "chief", file: "avatar-server_2d_1-chief-3.jpg" }],
+  };
+
+  it("carries the push registration and nothing else", () => {
+    expect(codec(LIVE_ACTIVITY_PUSH_ROUTES.register).request({ ...registration, name: "Ada" })).toEqual(registration);
+    expect(codec(LIVE_ACTIVITY_PUSH_ROUTES.register).response(200, {})).toEqual({});
+    expect(codec(LIVE_ACTIVITY_PUSH_ROUTES.remove).request({})).toEqual({});
+  });
+
+  it("refuses a token, secret or file name that could reach a path or a header", () => {
+    const request = codec(LIVE_ACTIVITY_PUSH_ROUTES.register).request;
+    expect(() => request({ ...registration, token: "../../3/device" })).toThrow();
+    expect(() => request({ ...registration, secret: "short" })).toThrow();
+    expect(() => request({ ...registration, photos: [{ agentId: "chief", file: "../secret.png" }] })).toThrow();
+    expect(() => request({ ...registration, environment: "staging" })).toThrow();
   });
 });

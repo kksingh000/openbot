@@ -442,6 +442,7 @@ export function SettingsModal(props: SettingsModalProps) {
           <Tabs.Content value="dynamic-island" class="settings-modal-tab-panel" data-tab="dynamic-island">
             <SettingsDynamicIslandTab
               value={props.value}
+              variant={props.appInfo?.variant ?? "production"}
               onUpdateSetting={updateSetting}
               onUpdateSettings={updateSettings}
             />

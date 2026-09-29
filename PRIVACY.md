@@ -15,6 +15,9 @@ user can also change the display name and avatar, disconnect account sessions, a
 the account's hosted sites from the browser; these requests and the avatar image go to the same
 account Worker as from the desktop app. Host settings,
 such as MCP servers, travel through the encrypted host connection.
+A Grok Bot export that a member imports into a joined server, from the desktop app or the browser, goes
+to the computer that runs that server through the same encrypted host connection, not through the
+account Worker. The host keeps the file only until the import ends, is cancelled, or expires.
 To show each server's state, the browser also keeps a status connection to each host of the account
 that no tab has open, as the mobile app does; the host then shows the member as present. Host logos
 come from the account Worker to members of the host, and the browser can cache them.
@@ -301,9 +304,11 @@ the mail client shows images. The image address is the same in every message and
 recipient.
 
 Cloudflare processes account and configuration API requests. It does not carry Team API, file,
-message, command, Remote Desktop media, or Remote Desktop input traffic. Cloudflare and the email
-provider can keep their own security, delivery, and network logs under their own policies. These
-provider logs are outside the OpenBot application database and its daily maintenance task.
+message, command, Remote Desktop media, or Remote Desktop input traffic. It forwards sealed iPhone
+Live Activity updates that it cannot read; see [iPhone Live Activity](#iphone-live-activity).
+Cloudflare and the email provider can keep their own security, delivery, and network logs under
+their own policies. These provider logs are outside the OpenBot application database and its daily
+maintenance task.
 
 Paid server plans use Stripe. You enter card and billing details on Stripe's pages, not in OpenBot.
 Stripe sends the account service the subscription state, the plan, its price, the period, and the
@@ -583,6 +588,41 @@ local application storage. This lets it recover the held draft after restart. Ne
 releases the host hold merely because the editor closes or disconnects. The host also preserves
 attachment drafts released by edit cancellation or message deletion until they are sent or
 discarded. This lets a disconnected desktop recover its saved composer backup after host restart.
+
+## iPhone Live Activity
+
+The iPhone app can show the state of the agents on the Lock Screen and in the Dynamic Island. While
+the app runs, the phone makes this view itself from the data that it receives over the encrypted
+host connection.
+
+When iOS stops the app in the background, the active host updates the view through Apple Push
+Notification service (APNs). For this, the phone gives that host, over the encrypted host
+connection, the push token of the Live Activity, a 32-byte secret for that host, its interface
+language, and the file names of the agent pictures that it saved on the phone. The phone makes each
+host secret from one random phone secret, so one host cannot seal an update or sign a button for
+another host. The phone keeps its secret in its secure storage and makes a new one when the user
+signs out. The host keeps these values in
+memory only, for the session that gave them. It forgets them when the phone removes them, when the
+session ends, when the member is removed or disabled, when Apple refuses the token, after 12 hours,
+and when the host stops.
+
+Each update contains the text that the view shows: agent names, the current task, the last reply,
+a question and its options, or a command that waits for approval. The host seals the update with
+keys made from the secret (an HMAC-SHA256 keystream and an HMAC-SHA256 tag) and sends it to the
+OpenBot account service, which sends it to Apple. The account service and Apple receive only the
+push token, the sealed bytes, the time, the priority, and the time when the content becomes out of
+date. They cannot read the content. The widget on the phone opens it and shows nothing with a
+wrong tag. The account service stores nothing from these requests and does not log them. It makes
+the Apple request itself and adds no text, so a host cannot use it to send an ordinary
+notification. Apple can keep its own delivery logs under its own policy.
+
+The buttons in the view open the app. A button that changes host state, such as Approve or an
+answer, has a signature made with a key that only the phone and the host have, so another app
+cannot start the action with an `openbot://` link. The app shows the command again before it
+approves it.
+
+Settings > General > Live Activities turns this off. The phone then removes its token from the
+host.
 
 ## Optional macOS Host Manager
 
