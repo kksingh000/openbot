@@ -1,10 +1,11 @@
-import type { GitHubConnectorStatus } from "@openbot/contracts/ipc";
+import type { GitHubConnectorRepositories, GitHubConnectorStatus } from "@openbot/contracts/ipc";
 import {
   Alert,
   AlertContent,
   AlertDescription,
   AlertIcon,
   AlertTitle,
+  Badge,
   Button,
   CopyButton,
   ExternalLink,
@@ -18,13 +19,17 @@ import {
   ShieldCheck,
   Text,
 } from "@openbot/ui";
-import { Match, Show, Switch } from "solid-js";
+import { For, Match, Show, Switch } from "solid-js";
 import { useText } from "../../text";
 
 export interface GitHubConnectorPanelProps {
   status: GitHubConnectorStatus;
   /** True while an action runs. Every button waits for it. */
   busy: boolean;
+  /** Null while the first list is read. */
+  repositories: GitHubConnectorRepositories | null;
+  /** Why the last list could not be read. */
+  repositoriesError: string | null;
   onConnect: () => void;
   onCancel: () => void;
   onDisconnect: () => void;
@@ -91,7 +96,7 @@ export function GitHubConnectorPanel(props: GitHubConnectorPanelProps) {
                   disabled={!props.status.verificationUri}
                   onClick={props.onOpenVerification}
                 >
-                  <ExternalLink aria-hidden="true" />
+                  <ExternalLink size={14} aria-hidden="true" />
                   {t("connector.github.openGitHub")}
                 </Button>
                 <Button type="button" size="sm" variant="ghost" onClick={props.onCancel}>
@@ -125,11 +130,61 @@ export function GitHubConnectorPanel(props: GitHubConnectorPanelProps) {
               </ItemContent>
               <ItemActions>
                 <Button type="button" size="sm" variant="outline" disabled={props.busy} onClick={props.onOpenInstall}>
-                  <ExternalLink aria-hidden="true" />
+                  <ExternalLink size={14} aria-hidden="true" />
                   {t("connector.github.chooseRepositories")}
                 </Button>
               </ItemActions>
             </Item>
+            <div class="github-connector-repositories">
+              <Show when={props.repositoriesError}>
+                {(message) => (
+                  <Text tone="danger" variant="caption" role="alert">
+                    {message()}
+                  </Text>
+                )}
+              </Show>
+              <Show
+                when={props.repositories}
+                fallback={
+                  <Show when={!props.repositoriesError}>
+                    <Text tone="muted" variant="caption">
+                      {t("connector.github.repositoriesLoading")}
+                    </Text>
+                  </Show>
+                }
+              >
+                {(list) => (
+                  <Show
+                    when={list().repositories.length > 0}
+                    fallback={
+                      <Text tone="muted" variant="caption">
+                        {t("connector.github.noRepositories")}
+                      </Text>
+                    }
+                  >
+                    <ul class="github-connector-repository-list" aria-label={t("connector.github.repositoriesTitle")}>
+                      <For each={list().repositories} keyed={(repository) => repository.fullName}>
+                        {(repository) => (
+                          <li class="github-connector-repository">
+                            <Text as="span" truncate>
+                              {repository().fullName}
+                            </Text>
+                            <Show when={repository().private}>
+                              <Badge variant="secondary">{t("connector.github.private")}</Badge>
+                            </Show>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                    <Show when={list().total > list().repositories.length}>
+                      <Text tone="muted" variant="caption">
+                        {t("connector.github.moreRepositories", { count: list().total - list().repositories.length })}
+                      </Text>
+                    </Show>
+                  </Show>
+                )}
+              </Show>
+            </div>
           </Match>
           <Match when={props.status.state === "expired"}>
             <Item class="settings-modal-row">

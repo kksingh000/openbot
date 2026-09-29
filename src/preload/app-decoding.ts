@@ -35,6 +35,7 @@ import {
   type DiscoverModelsResult,
   decodeScheduledUpdateRestart,
   type ExportResult,
+  type GitHubConnectorRepositories,
   type GitHubConnectorStatus,
   type HostedSiteSummary,
   isAgentModel,
@@ -57,6 +58,7 @@ import {
   type NotificationOpenedEvent,
   type NotificationPreference,
   type ProviderDetectionSettings,
+  parseGitHubConnectorRepositories,
   parseGitHubConnectorStatus,
   type RemoteDesktopSetupStatus,
   type RemoteDesktopTestStatus,
@@ -293,6 +295,12 @@ export function decodeGitHubConnectorStatus(value: unknown): GitHubConnectorStat
   const status = parseGitHubConnectorStatus(value);
   if (!status) throw new Error("Invalid GitHub connector response.");
   return status;
+}
+
+export function decodeGitHubConnectorRepositories(value: unknown): GitHubConnectorRepositories {
+  const repositories = parseGitHubConnectorRepositories(value);
+  if (!repositories) throw new Error("Invalid GitHub repository list response.");
+  return repositories;
 }
 
 export function decodeBillingState(value: unknown): BillingState {

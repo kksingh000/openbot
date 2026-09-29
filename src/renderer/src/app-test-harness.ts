@@ -573,6 +573,7 @@ export function installOpenbotStub(): void {
     hostedSites: stubGroup(IPC_ENDPOINTS.hostedSites, "hostedSites", {}),
     githubConnector: stubGroup(IPC_ENDPOINTS.githubConnector, "githubConnector", {
       status: vi.fn().mockResolvedValue(DISCONNECTED_GITHUB_CONNECTOR),
+      repositories: vi.fn().mockResolvedValue({ repositories: [], total: 0 }),
     }),
     billing: stubGroup(IPC_ENDPOINTS.billing, "billing", {}),
     hostedServers: stubGroup(IPC_ENDPOINTS.hostedServers, "hostedServers", {

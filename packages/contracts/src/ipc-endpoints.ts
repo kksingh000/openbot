@@ -168,7 +168,7 @@ import type {
   SetDynamicIslandInteractiveInput,
   SetDynamicIslandPreferenceInput,
 } from "./ipc-dynamic-island";
-import type { GitHubConnectorStatus } from "./ipc-github-connector";
+import type { GitHubConnectorRepositories, GitHubConnectorStatus } from "./ipc-github-connector";
 import type { HostAnalytics, HostAnalyticsInput } from "./ipc-host-analytics";
 import type {
   DeleteHostedSiteInput,
@@ -565,6 +565,7 @@ export const IPC_ENDPOINTS = {
     connect: request<undefined, GitHubConnectorStatus>()("github-connector:connect"),
     cancel: request<undefined, GitHubConnectorStatus>()("github-connector:cancel"),
     disconnect: request<undefined, GitHubConnectorStatus>()("github-connector:disconnect"),
+    repositories: request<undefined, GitHubConnectorRepositories>()("github-connector:repositories"),
     openVerification: request<undefined, void>()("github-connector:open-verification"),
     openInstall: request<undefined, void>()("github-connector:open-install"),
     changed: event<GitHubConnectorStatus>()("github-connector:changed"),

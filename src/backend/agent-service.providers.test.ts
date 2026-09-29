@@ -543,7 +543,7 @@ describe.sequential("AgentService: providers", () => {
           url: GITHUB_CONNECTOR_MCP_SERVER_URL,
           headers: [],
         }),
-        accessToken: async () => token,
+        mcpAuthorization: async () => token,
       },
     });
     service.on("event", (event) => events.push(event));

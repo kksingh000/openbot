@@ -655,6 +655,7 @@ export async function createApplicationServices({
     app: githubAppConfig(),
     store: new GitHubConnectorStore(join(app.getPath("userData"), GITHUB_CONNECTOR_FILE), secretCipher),
     toolDirectory: join(app.getPath("userData"), "provider-state", "github"),
+    apiUrl: centralAuthApiUrl,
     openExternal: (url) => shell.openExternal(url),
   });
   await githubConnector.load();

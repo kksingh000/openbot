@@ -1417,11 +1417,27 @@ The GitHub connector is built in and has no SQLite row. `src/main/github-connect
 in to the `openbot` GitHub App with the device flow, which needs only the public Client ID, and keeps
 the tokens in `openbot-github-connector-v1.json`, encrypted with `safeStorage`. While it is
 connected, `McpGateway.enabled()` adds the `openbot-github` server (`api.githubcopilot.com/mcp/`),
-and `authorization()` gives it a fresh token at each hand-off. An enabled server that the user added
+and `authorization()` gives it a fresh bearer at each hand-off. An enabled server that the user added
 with the name `github` wins. For `gh` and `git`, the service writes the token to
 `<userData>/provider-state/github` (mode 0600), and each provider gets `GH_CONFIG_DIR` and a
 `GIT_CONFIG_*` credential helper that reads that file. The environment holds only paths, never the
 token. Codex gets these values through `shell_environment_policy.set` in the thread config.
+
+A user token makes GitHub show "user with OpenBotGit". To show `openbotgit[bot]`, the desktop sends
+the user token to `POST /v1/github/installation-tokens` on the account Worker
+(`apps/auth-api/src/server/github-installation-tokens.ts`). The Worker holds the app's private key
+(`GITHUB_APP_PRIVATE_KEY`, PKCS #8) and signs an app JWT. It mints one installation token for each
+installation of this app, limited to the repositories where the user can push, maintain or
+administer, and stores nothing. With no key it answers 503, and the desktop keeps the user token.
+`src/main/github-bot-tokens.ts` renews the set ten minutes before the first token expires.
+- `git`: the helper runs with `useHttpPath`, and takes the bot token for the repository from
+  `provider-state/github/repositories`, or else the user token.
+- MCP: `src/main/github-mcp-proxy.ts` is a loopback MCP server with a secret bearer. It forwards to
+  `api.githubcopilot.com/mcp/` with one upstream client for each token, because GitHub binds an MCP
+  session to its token. A tool call with `owner` and `repo` arguments uses that repository's bot
+  token. The port and the secret stay in the encrypted record, so a resumed Codex session keeps its
+  URL and header.
+- `gh` has one token for each host, so it acts as the user.
 
 ## Local skill library
 

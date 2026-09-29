@@ -1,12 +1,15 @@
 // The built-in GitHub connection of this computer: one sign-in to the GitHub App, shared by every
 // agent as the GitHub MCP server and as the credential that `gh` and `git` read.
 
+import { randomBytes } from "node:crypto";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   GITHUB_CONNECTOR_MCP_SERVER_ID,
   GITHUB_CONNECTOR_MCP_SERVER_NAME,
   GITHUB_CONNECTOR_MCP_SERVER_URL,
+  type GitHubConnectorRepositories,
+  type GitHubConnectorRepository,
   type GitHubConnectorState,
   type GitHubConnectorStatus,
   type McpServerConfig,
@@ -15,6 +18,7 @@ import { sourceText } from "@openbot/i18n/source";
 import { createOpenBotLogger, redactText, registerSecretValue, toLogValue } from "@openbot/logging";
 import { z } from "zod";
 import { writeFileAtomically } from "../backend/atomic-json-file";
+import { GitHubBotTokens } from "./github-bot-tokens";
 import type { GitHubAppConfig } from "./github-connector-config";
 import type { GitHubConnectorRecord, GitHubConnectorStore } from "./github-connector-store";
 import {
@@ -27,6 +31,7 @@ import {
   refreshGitHubToken,
   requestGitHubDeviceCode,
 } from "./github-device-flow";
+import { GitHubMcpProxy } from "./github-mcp-proxy";
 
 const logger = createOpenBotLogger("github-connector");
 
@@ -39,11 +44,24 @@ const REFRESH_MARGIN_MS = 10 * 60_000;
  */
 const REFRESH_CHECK_MS = 60_000;
 const GIT_CREDENTIAL_KEY = "credential.https://github.com.helper";
+/** Git then sends the repository path to the helper, which picks the bot token of that repository. */
+const GIT_USE_HTTP_PATH_KEY = "credential.https://github.com.useHttpPath";
 /** The fields of `GET /user` that the status shows. */
 const githubUserSchema = z.object({
   login: z.string().min(1),
   id: z.number(),
   avatar_url: z.string().nullish(),
+});
+/** GitHub's largest page. */
+const GITHUB_PAGE_SIZE = 100;
+/** The list stops here. The status still counts every repository. */
+const MAX_LISTED_REPOSITORIES = 500;
+const githubInstallationsSchema = z.object({
+  installations: z.array(z.object({ id: z.number() })),
+});
+const githubRepositoriesSchema = z.object({
+  total_count: z.number(),
+  repositories: z.array(z.object({ full_name: z.string().min(1), private: z.boolean() })),
 });
 
 export interface GitHubConnectorServiceOptions {
@@ -55,6 +73,8 @@ export interface GitHubConnectorServiceOptions {
    * and the token file that the git credential helper reads, while the connection is active.
    */
   toolDirectory: string;
+  /** The OpenBot API, which gives the installation tokens that make GitHub show the app as the author. */
+  apiUrl: string;
   openExternal: (url: string) => Promise<void>;
   fetch?: GitHubFetch;
   now?: () => number;
@@ -72,9 +92,13 @@ interface PendingSignIn {
  * `mcpServer`, `accessToken` and `agentEnvironment`, and `onAgentAccessChanged` tells it when that
  * answer changes.
  *
- * The token itself never leaves the main process except to GitHub, to the GitHub MCP server as a
- * bearer header, and into the two files below for `gh` and `git`. Each token is registered for
- * redaction before it is used.
+ * The user token never leaves the main process except to GitHub, to the OpenBot API as the proof
+ * for the installation tokens, and into the files below for `gh` and `git`. Agents reach GitHub's
+ * MCP server through `GitHubMcpProxy`, which adds the token for each call. Each token is registered
+ * for redaction before it is used.
+ *
+ * `gh` has one token for each host, so it keeps the user token: GitHub shows its work as "user with
+ * OpenBotGit". `git` and the MCP tools use the bot token of each repository where the user can push.
  */
 export class GitHubConnectorService {
   readonly #app: GitHubAppConfig | null;
@@ -103,6 +127,12 @@ export class GitHubConnectorService {
   #queue: Promise<void> = Promise.resolve();
   /** What agents were last told, so a change that does not alter it replaces no session. */
   #agentAccess = false;
+  readonly #botTokens: GitHubBotTokens;
+  #renewingBotTokens: Promise<void> | null = null;
+  /** Null when the loopback server could not start: agents then reach GitHub's server with the user token. */
+  #mcpProxy: GitHubMcpProxy | null = null;
+  /** Generated at the first start, then kept in the record. */
+  #mcpProxySecret = randomBytes(32).toString("base64url");
 
   constructor(options: GitHubConnectorServiceOptions) {
     this.#app = options.app;
@@ -111,6 +141,8 @@ export class GitHubConnectorService {
     this.#openExternal = options.openExternal;
     this.#fetch = options.fetch ?? ((url, init) => fetch(url, init));
     this.#now = options.now ?? Date.now;
+    this.#botTokens = new GitHubBotTokens({ apiUrl: options.apiUrl, fetch: this.#fetch, now: this.#now });
+    registerSecretValue(this.#mcpProxySecret);
   }
 
   /**
@@ -121,6 +153,7 @@ export class GitHubConnectorService {
     const error = await this.#store.load();
     if (error) logger.warn("The GitHub connection file could not be read.", { cause: toLogValue(error) });
     const record = this.#store.read();
+    if (this.#app) await this.#startMcpProxy(record);
     await this.#serialize(async () => {
       if (!record || !this.#app) {
         await this.#removeToolFiles();
@@ -215,6 +248,8 @@ export class GitHubConnectorService {
     const hadRecord = this.#store.read() !== null;
     await this.#serialize(async () => {
       await this.#store.clear();
+      this.#botTokens.clear();
+      this.#mcpProxy?.retain(new Set());
       await this.#removeToolFiles();
     });
     this.#expired = false;
@@ -232,14 +267,54 @@ export class GitHubConnectorService {
     if (uri) await this.#open(uri);
   }
 
+  /**
+   * The repositories that agents reach: those of each installation of the app that the user can use.
+   * Empty while the connection is not active.
+   */
+  async repositories(): Promise<GitHubConnectorRepositories> {
+    const token = await this.accessToken();
+    if (!token) return { repositories: [], total: 0 };
+    // The panel reads the list again after an install, which can add repositories.
+    this.#botTokens.invalidate();
+    this.#checkRefresh();
+    const { installations } = await this.#getGitHub(
+      `https://api.github.com/user/installations?per_page=${GITHUB_PAGE_SIZE}`,
+      token,
+      githubInstallationsSchema,
+    );
+    const repositories: GitHubConnectorRepository[] = [];
+    let total = 0;
+    for (const installation of installations) {
+      for (let page = 1; ; page += 1) {
+        const answer = await this.#getGitHub(
+          `https://api.github.com/user/installations/${installation.id}/repositories?per_page=${GITHUB_PAGE_SIZE}&page=${page}`,
+          token,
+          githubRepositoriesSchema,
+        );
+        if (page === 1) total += answer.total_count;
+        for (const repository of answer.repositories) {
+          repositories.push({ fullName: repository.full_name, private: repository.private });
+        }
+        const listedAll = page * GITHUB_PAGE_SIZE >= answer.total_count || answer.repositories.length === 0;
+        if (listedAll || repositories.length >= MAX_LISTED_REPOSITORIES) break;
+      }
+      if (repositories.length >= MAX_LISTED_REPOSITORIES) break;
+    }
+    repositories.sort((left, right) => left.fullName.localeCompare(right.fullName, "en", { sensitivity: "base" }));
+    return {
+      repositories: repositories.slice(0, MAX_LISTED_REPOSITORIES),
+      total: Math.max(total, repositories.length),
+    };
+  }
+
   /** GitHub's page where the user picks the repositories the app may reach. */
   async openInstall(): Promise<void> {
     if (this.#app) await this.#open(`https://github.com/apps/${this.#app.slug}/installations/new`);
   }
 
   /**
-   * The token for the GitHub MCP server, refreshed first when it has less than ten minutes left.
-   * Null while the connection is not active.
+   * The user token, refreshed first when it has less than ten minutes left. Null while the
+   * connection is not active.
    */
   async accessToken(): Promise<string | null> {
     const record = this.#store.read();
@@ -248,6 +323,15 @@ export class GitHubConnectorService {
     // A sign-in that replaced this one during the refresh gives its own token.
     const current = (await this.#refresh()) ?? this.#store.read();
     return current && this.#agentConnected() && !this.#accessTokenExpired(current) ? current.accessToken : null;
+  }
+
+  /**
+   * The bearer that agents send to the GitHub MCP server: the loopback server's own secret, or the
+   * user token when that server did not start.
+   */
+  async mcpAuthorization(): Promise<string | null> {
+    if (!this.#agentConnected()) return null;
+    return this.#mcpProxy ? this.#mcpProxySecret : this.accessToken();
   }
 
   /** The GitHub MCP server that agents are given, or null while the connection is not active. */
@@ -263,32 +347,46 @@ export class GitHubConnectorService {
       env: [],
       envPassthrough: [],
       workingDirectory: "",
-      url: GITHUB_CONNECTOR_MCP_SERVER_URL,
+      url: this.#mcpProxy?.url() ?? GITHUB_CONNECTOR_MCP_SERVER_URL,
       headers: [],
     };
   }
 
   /**
    * The environment that makes `gh` and `git` use this connection. It holds paths only, never the
-   * token: a provider process runs for many hours and the token changes every eight, so the token
-   * lives in files that each refresh rewrites.
+   * token: a provider process runs for many hours, and a new sign-in or a refresh changes the token,
+   * so the token lives in files that each change rewrites.
    *
    * The empty helper value clears the helpers from the user's own git configuration for github.com.
    * Without it, a system helper such as the macOS keychain would store the short-lived token after
-   * the first push, and give it back after it expired. The two entries go after the `GIT_CONFIG_*`
+   * the first push, and give it back after it expired. The entries go after the `GIT_CONFIG_*`
    * entries in `inherited`, the environment the process starts with, so those entries still apply.
+   *
+   * The helper reads the repository path that `useHttpPath` makes git send, and gives the bot token
+   * from the repositories file when that file names the repository. Otherwise it gives the user token.
    */
   agentEnvironment(inherited: NodeJS.ProcessEnv = process.env): Record<string, string> {
     if (!this.#agentConnected()) return {};
-    const credentialFile = this.#credentialFile().replaceAll("\\", "/");
+    const tokenFile = shellQuote(this.#credentialFile().replaceAll("\\", "/"));
+    const repositoriesFile = shellQuote(this.#repositoriesFile().replaceAll("\\", "/"));
     const first = gitConfigCount(inherited.GIT_CONFIG_COUNT);
+    const helper = [
+      '!f() { test "$1" = get || exit 0; p=',
+      "while IFS='=' read -r k v; do test \"$k\" = path && p=$v; done",
+      // Git sends `owner/name.git`, and the file holds `owner/name`.
+      `t=; test -n "$p" && t=$(awk -F '\\t' -v r="$p" 'BEGIN { sub(/\\/+$/, "", r); sub(/\\.git$/, "", r) } tolower($1) == tolower(r) { print $2; exit }' ${repositoriesFile} 2>/dev/null)`,
+      "echo username=x-access-token; printf 'password='",
+      `if test -n "$t"; then printf '%s' "$t"; else cat ${tokenFile}; fi; echo; }; f`,
+    ].join("; ");
     return {
       GH_CONFIG_DIR: this.#ghConfigDirectory(),
-      GIT_CONFIG_COUNT: String(first + 2),
+      GIT_CONFIG_COUNT: String(first + 3),
       [`GIT_CONFIG_KEY_${first}`]: GIT_CREDENTIAL_KEY,
       [`GIT_CONFIG_VALUE_${first}`]: "",
       [`GIT_CONFIG_KEY_${first + 1}`]: GIT_CREDENTIAL_KEY,
-      [`GIT_CONFIG_VALUE_${first + 1}`]: `!f() { test "$1" = get || exit 0; echo username=x-access-token; printf 'password='; cat ${shellQuote(credentialFile)}; echo; }; f`,
+      [`GIT_CONFIG_VALUE_${first + 1}`]: helper,
+      [`GIT_CONFIG_KEY_${first + 2}`]: GIT_USE_HTTP_PATH_KEY,
+      [`GIT_CONFIG_VALUE_${first + 2}`]: "true",
     };
   }
 
@@ -305,6 +403,8 @@ export class GitHubConnectorService {
     this.#refreshCheck = null;
     this.#statusListeners.clear();
     this.#accessListeners.clear();
+    this.#botTokens.clear();
+    await this.#mcpProxy?.stop();
     await this.#serialize(() => this.#removeToolFiles());
   }
 
@@ -334,7 +434,7 @@ export class GitHubConnectorService {
       });
       registerTokenSecrets(tokens);
       const user = await this.#readUser(tokens.accessToken, pending.controller.signal);
-      const record: GitHubConnectorRecord = { ...tokens, ...user };
+      const record: GitHubConnectorRecord = { ...tokens, ...user, mcpProxy: this.#mcpProxySettings() };
       // Checked in the queue: a cancel or disconnect that ran while the last change was written wins.
       const committed = await this.#serialize(async () => {
         if (this.#pending !== pending || this.#disposed) return false;
@@ -343,12 +443,14 @@ export class GitHubConnectorService {
         this.#pending = null;
         this.#expired = false;
         this.#error = null;
+        this.#botTokens.clear();
         await this.#writeToolFiles(record);
         return true;
       });
       if (!committed) return;
       this.#emitStatus();
       this.#syncAgentAccess();
+      this.#checkRefresh();
     } catch (error) {
       if (pending.controller.signal.aborted || this.#pending !== pending) return;
       this.#fail(pending, error);
@@ -369,10 +471,17 @@ export class GitHubConnectorService {
     accessToken: string,
     signal: AbortSignal,
   ): Promise<Pick<GitHubConnectorRecord, "login" | "userId" | "avatarUrl">> {
+    const user = await this.#getGitHub("https://api.github.com/user", accessToken, githubUserSchema, signal);
+    return { login: user.login, userId: user.id, avatarUrl: user.avatar_url ?? null };
+  }
+
+  /** One GitHub API read. A failure is a `GitHubDeviceFlowError` whose message the panel can show. */
+  async #getGitHub<T>(url: string, accessToken: string, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
+    const timeout = AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await this.#fetch("https://api.github.com/user", {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(GITHUB_REQUEST_TIMEOUT_MS)]),
+      response = await this.#fetch(url, {
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         headers: {
           Accept: "application/vnd.github+json",
           Authorization: `Bearer ${accessToken}`,
@@ -381,7 +490,7 @@ export class GitHubConnectorService {
         },
       });
     } catch (cause) {
-      if (signal.aborted) throw signal.reason;
+      if (signal?.aborted) throw signal.reason;
       throw new GitHubDeviceFlowError(
         "unreachable",
         sourceText("error.connector.githubUnreachable", {
@@ -389,14 +498,15 @@ export class GitHubConnectorService {
         }),
       );
     }
-    const user = githubUserSchema.safeParse(await response.json().catch(() => null));
-    if (!response.ok || !user.success) {
+    const answer = schema.safeParse(await response.json().catch(() => null));
+    if (!response.ok || !answer.success) {
+      const path = new URL(url).pathname;
       throw new GitHubDeviceFlowError(
         "unexpected",
-        sourceText("error.connector.githubUnexpected", { detail: `user HTTP ${response.status}` }),
+        sourceText("error.connector.githubUnexpected", { detail: `${path} HTTP ${response.status}` }),
       );
     }
-    return { login: user.data.login, userId: user.data.id, avatarUrl: user.data.avatar_url ?? null };
+    return answer.data;
   }
 
   #needsRefresh(record: GitHubConnectorRecord): boolean {
@@ -414,11 +524,36 @@ export class GitHubConnectorService {
     );
   }
 
-  /** Starts a refresh when the token has less than ten minutes left, so `gh` and `git` keep a valid one. */
+  /**
+   * Starts a refresh when the user token has less than ten minutes left, so `gh` and `git` keep a
+   * valid one, and asks for new installation tokens when they are due.
+   */
   #checkRefresh(): void {
     const record = this.#store.read();
-    if (this.#disposed || !record || !this.#agentConnected() || !this.#needsRefresh(record)) return;
-    void this.#refresh();
+    if (this.#disposed || !record || !this.#agentConnected()) return;
+    if (this.#needsRefresh(record)) void this.#refresh();
+    if (this.#botTokens.due()) void this.#renewBotTokens();
+  }
+
+  /** One request at a time. A new set is written to the repositories file for the git helper. */
+  #renewBotTokens(): Promise<void> {
+    this.#renewingBotTokens ??= this.#runBotTokenRenewal().finally(() => {
+      this.#renewingBotTokens = null;
+    });
+    return this.#renewingBotTokens;
+  }
+
+  async #runBotTokenRenewal(): Promise<void> {
+    const generation = this.#generation;
+    const userToken = await this.accessToken();
+    if (!userToken) return;
+    const changed = await this.#botTokens.renew(userToken);
+    if (!changed) return;
+    await this.#serialize(async () => {
+      if (this.#disposed || this.#generation !== generation || !this.#agentConnected()) return;
+      await this.#writeRepositoriesFile();
+    });
+    this.#mcpProxy?.retain(new Set([userToken, ...this.#botTokens.entries().map(([, token]) => token)]));
   }
 
   /** One refresh at a time: a hand-off and the check can ask together, and GitHub rotates the refresh token. */
@@ -501,6 +636,8 @@ export class GitHubConnectorService {
   async #expire(): Promise<void> {
     this.#expired = true;
     this.#error = sourceText("error.connector.githubExpired");
+    this.#botTokens.clear();
+    this.#mcpProxy?.retain(new Set());
     await this.#removeToolFiles();
     this.#emitStatus();
     this.#syncAgentAccess();
@@ -521,6 +658,50 @@ export class GitHubConnectorService {
 
   #credentialFile(): string {
     return join(this.#toolDirectory, "token");
+  }
+
+  /** One line for each repository with a bot token: `owner/name`, a tab, the token. */
+  #repositoriesFile(): string {
+    return join(this.#toolDirectory, "repositories");
+  }
+
+  async #writeRepositoriesFile(): Promise<void> {
+    const lines = this.#botTokens.entries().map(([repository, token]) => `${repository}\t${token}\n`);
+    await writeFileAtomically(this.#repositoriesFile(), lines.join(""));
+  }
+
+  /**
+   * Starts the loopback GitHub MCP server on the port it had, so that a resumed session finds it. A
+   * server that cannot start is logged: agents then reach GitHub's server with the user token.
+   */
+  async #startMcpProxy(record: GitHubConnectorRecord | null): Promise<void> {
+    if (record?.mcpProxy) {
+      this.#mcpProxySecret = record.mcpProxy.secret;
+      registerSecretValue(this.#mcpProxySecret);
+    }
+    const proxy = new GitHubMcpProxy({
+      upstreamUrl: GITHUB_CONNECTOR_MCP_SERVER_URL,
+      secret: this.#mcpProxySecret,
+      userToken: () => this.accessToken(),
+      botToken: (owner, name) => this.#botTokens.forRepository(owner, name),
+    });
+    try {
+      await proxy.start(record?.mcpProxy?.port ?? null);
+    } catch (error) {
+      logger.warn("The GitHub MCP server of this computer did not start.", { cause: toLogValue(error) });
+      return;
+    }
+    this.#mcpProxy = proxy;
+    const settings = this.#mcpProxySettings();
+    if (record && settings && record.mcpProxy?.port !== settings.port) {
+      await this.#store.write({ ...record, mcpProxy: settings });
+    }
+  }
+
+  #mcpProxySettings(): GitHubConnectorRecord["mcpProxy"] {
+    const url = this.#mcpProxy?.url();
+    const port = url ? Number(new URL(url).port) : null;
+    return port ? { port, secret: this.#mcpProxySecret } : null;
   }
 
   /**
@@ -544,6 +725,7 @@ export class GitHubConnectorService {
     ].join("\n");
     await writeFileAtomically(join(this.#ghConfigDirectory(), "hosts.yml"), hosts);
     await writeFileAtomically(this.#credentialFile(), record.accessToken);
+    await this.#writeRepositoriesFile();
   }
 
   async #removeToolFiles(): Promise<void> {

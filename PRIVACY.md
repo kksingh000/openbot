@@ -344,9 +344,10 @@ Billing is off, and Stripe receives nothing, when the account service has no Str
 - The GitHub connection (Server settings > Connectors) is kept in
   `~/Library/Application Support/OpenBot/openbot-github-connector-v1.json`, encrypted by the operating
   system's secret storage. It holds the GitHub access and refresh tokens and the account name and ID.
-  While the connection is on, `provider-state/github` in the same folder holds the access token in
-  plain text, with mode 0600, for `gh` and `git` in agent tools. OpenBot deletes that folder when you
-  disconnect and when the app closes. The tokens are redacted from logs, exports and diagnostics.
+  While the connection is on, `provider-state/github` in the same folder holds the access token and
+  the OpenBot GitHub App's installation tokens in plain text, with mode 0600, for `gh` and `git` in
+  agent tools. OpenBot deletes that folder when you disconnect and when the app closes. The tokens
+  are redacted from logs, exports and diagnostics.
 - `~/Library/Application Support/OpenBot/logs/trace.ndjson` is a local trace of IPC calls,
   provider turns, and main-process failures. Each line holds a time, the IPC channel name, the turn
   origin or the failure origin (`uncaughtException` or `unhandledRejection`), the duration, and the
@@ -393,7 +394,12 @@ Network traffic can also occur when:
 - the user connects GitHub in Server settings. OpenBot asks `github.com` for a sign-in code and a
   token, renews the token, and reads the account name from `api.github.com`. Agents then reach the
   GitHub MCP server at `api.githubcopilot.com` and GitHub itself through `gh` and `git`, with that
-  token. The token stays on this computer; the central account service and Cloudflare get nothing;
+  token. So that GitHub shows the OpenBot app as the author of an agent's work, OpenBot sends that
+  token to the central account service (`api.openbot.run`) about once an hour. The service uses it
+  only to ask GitHub which repositories you can push to, and gets back short-lived installation
+  tokens for those repositories. It does not store or log either token, and it gets no chats, files
+  or commands. Agents reach the GitHub MCP server through a local server on `127.0.0.1`, which adds
+  the right token to each call;
 - an installed build checks GitHub Releases for updates;
 - OpenBot checks for new provider CLI releases when it starts, once an hour, and when you select
   `Check for updates`. It asks `api.github.com` for Codex, `registry.npmjs.org` for Claude and

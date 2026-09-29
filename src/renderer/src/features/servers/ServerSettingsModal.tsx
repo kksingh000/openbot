@@ -569,6 +569,8 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
               <GitHubConnectorPanel
                 status={github().status()}
                 busy={github().busy()}
+                repositories={github().repositories()}
+                repositoriesError={github().repositoriesError()}
                 onConnect={github().connect}
                 onCancel={github().cancel}
                 onDisconnect={github().disconnect}

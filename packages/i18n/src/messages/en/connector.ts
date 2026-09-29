@@ -18,6 +18,13 @@ export const messages = defineMessages("connector", {
   "connector.github.repositoriesDescription":
     "Agents can use only the repositories where the OpenBot GitHub App is installed.",
   "connector.github.chooseRepositories": "Choose repositories",
+  "connector.github.repositoriesLoading": "Reading the repositories from GitHub",
+  "connector.github.repositoriesFailed": "OpenBot could not read the repositories from GitHub.",
+  "connector.github.noRepositories": "The OpenBot GitHub App is not installed on a repository yet.",
+  // {count} is a number, such as 12.
+  "connector.github.moreRepositories": { one: "And {count} more repository", other: "And {count} more repositories" },
+  // A badge next to a repository that only its members can see.
+  "connector.github.private": "Private",
   "connector.github.disconnect": "Disconnect",
   "connector.github.disconnectDescription":
     "Disconnect removes the sign-in from this computer. Then GitHub opens, where you can revoke OpenBot.",

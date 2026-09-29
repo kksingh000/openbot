@@ -56,6 +56,16 @@ export function createMockGitHubConnector(): GitHubConnectorDesktopApi {
       stopTimer();
       return set(DISCONNECTED);
     },
+    repositories: async () =>
+      status.state === "connected"
+        ? {
+            repositories: [
+              { fullName: "octocat/hello-world", private: false },
+              { fullName: "octocat/private-notes", private: true },
+            ],
+            total: 2,
+          }
+        : { repositories: [], total: 0 },
     openVerification: async () => undefined,
     openInstall: async () => undefined,
     onChanged: (listener) => {

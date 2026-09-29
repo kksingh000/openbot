@@ -1,4 +1,4 @@
-import { isBoolean, isDynamicRecord, isString } from "./runtime-values";
+import { isBoolean, isDynamicRecord, isNumber, isString } from "./runtime-values";
 
 /**
  * The built-in GitHub connection of this computer. One sign-in to the GitHub App "OpenBotGit", shared
@@ -64,4 +64,34 @@ export function parseGitHubConnectorStatus(value: unknown): GitHubConnectorStatu
     verificationUri: value.verificationUri,
     error: value.error,
   };
+}
+
+export interface GitHubConnectorRepository {
+  /** `owner/name`. */
+  fullName: string;
+  private: boolean;
+}
+
+/** The repositories that the connection reaches: those where the GitHub App is installed for the user. */
+export interface GitHubConnectorRepositories {
+  /** Sorted by `fullName`. At most a few hundred, so `total` can be larger. */
+  repositories: GitHubConnectorRepository[];
+  total: number;
+}
+
+function parseGitHubConnectorRepository(value: unknown): GitHubConnectorRepository | null {
+  if (!isDynamicRecord(value) || !isString(value.fullName) || !isBoolean(value.private)) return null;
+  return { fullName: value.fullName, private: value.private };
+}
+
+/** Returns null for a value that is not a repository list in the desktop shape. */
+export function parseGitHubConnectorRepositories(value: unknown): GitHubConnectorRepositories | null {
+  if (!isDynamicRecord(value) || !Array.isArray(value.repositories) || !isNumber(value.total)) return null;
+  const repositories: GitHubConnectorRepository[] = [];
+  for (const item of value.repositories) {
+    const repository = parseGitHubConnectorRepository(item);
+    if (!repository) return null;
+    repositories.push(repository);
+  }
+  return { repositories, total: value.total };
 }

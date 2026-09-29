@@ -194,7 +194,7 @@ async function main(): Promise<void> {
   logger.info(`The secrets are in ${secretsPath} (mode 0600). OpenBot does not use them.`);
   logger.info("Do these steps in the app settings. A manifest cannot do them:");
   logger.info("  1. General > Identifying and authorizing users: select Enable Device Flow.");
-  logger.info("  2. General > Optional features: keep User-to-server token expiration on.");
+  logger.info("  2. Optional features: opt out of User-to-server token expiration.");
   if (conversion.slug !== "openbotgit") {
     logger.info(`GitHub gave the slug ${conversion.slug}. Put it in GITHUB_APP_SLUG too.`);
   }

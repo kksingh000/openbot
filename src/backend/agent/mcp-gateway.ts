@@ -45,11 +45,12 @@ export interface McpGatewayHooks {
 
 /**
  * The built-in GitHub connection, as the gateway reads it. The main process owns the sign-in; the
- * gateway sees the entry while the connection is active, and a fresh token at each hand-off.
+ * gateway sees the entry while the connection is active, and a fresh bearer at each hand-off.
  */
 export interface GitHubConnectorSource {
   mcpServer(): McpServerConfig | null;
-  accessToken(): Promise<string | null>;
+  /** The bearer for `mcpServer()`: the secret of the loopback GitHub MCP server, or the user token. */
+  mcpAuthorization(): Promise<string | null>;
 }
 
 export interface McpGatewayOptions {
@@ -125,7 +126,7 @@ export class McpGateway {
     // The built-in GitHub entry spends the GitHub connection, not an MCP sign-in of its own.
     const token =
       config.id === GITHUB_CONNECTOR_MCP_SERVER_ID
-        ? ((await this.#githubConnector?.accessToken()) ?? null)
+        ? ((await this.#githubConnector?.mcpAuthorization()) ?? null)
         : ((await this.#oauth?.accessToken(config.url)) ?? null);
     // The one place a minted token is known before it leaves this process. The row never holds
     // it, so this is what lets `redact` keep it out of a provider's own report of a failure.
