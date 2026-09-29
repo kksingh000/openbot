@@ -89,6 +89,11 @@ export const PROVIDER_IDLE_RELEASE_MS = 10 * 60_000;
  */
 export const PROVIDER_UNASSIGNED_RELEASE_MS = 60_000;
 const PROVIDER_IDLE_CHECK_MS = 60_000;
+/**
+ * The providers whose shared process reads the agent environment only when it starts. Claude reads
+ * it at each session start, and Codex with each thread's config.
+ */
+const SPAWN_ENVIRONMENT_PROVIDERS: readonly AgentProvider[] = ["grok", "opencode", "antigravity", "acp"];
 
 /**
  * True once a window of a kept reading has passed its reset time, so the reading is stale. Only
@@ -274,6 +279,8 @@ export class ProviderRuntime implements ProviderPort {
   readonly #released = new Set<AgentProvider>();
   /** A custom agent change that a turn delayed. The idle check applies it when the turn stops. */
   #customAgentsReloadPending = false;
+  /** Providers that a turn kept on the old agent environment. The idle check restarts each after its turn. */
+  readonly #environmentReloadPending = new Set<AgentProvider>();
   readonly #lastUsed = new Map<AgentProvider, number>();
   /** The last usage each provider reported, shown for a released provider instead of starting it. */
   readonly #lastUsage = new Map<AgentProvider, AccountUsage["limits"][number]>();
@@ -421,6 +428,9 @@ export class ProviderRuntime implements ProviderPort {
   async #releaseIdleProviders(): Promise<void> {
     if (this.#hooks.isStopping() || this.#status.phase !== "ready") return;
     if (this.#customAgentsReloadPending && !this.#hooks.isProviderBusy("acp")) void this.reloadCustomAgents();
+    for (const provider of this.#environmentReloadPending) {
+      if (!this.#hooks.isProviderBusy(provider)) void this.#reloadAgentEnvironment(provider);
+    }
     const now = Date.now();
     for (const [provider, client] of this.#clients) {
       if (
@@ -745,6 +755,31 @@ export class ProviderRuntime implements ProviderPort {
       return this.#hooks.isProviderBusy("opencode") ? "skipped-busy" : "restarted";
     }
     return "restarted";
+  }
+
+  /**
+   * Restarts each running process that read the agent environment when it started, so the next
+   * turn gets the new one. The rules of `reloadOpenCodeConfig` apply, and a restart that a turn
+   * delays is applied by the idle check after the turn stops. A Workspace only process is replaced
+   * at its next turn, because its key names the activation.
+   */
+  async reloadAgentEnvironment(): Promise<void> {
+    await Promise.all(SPAWN_ENVIRONMENT_PROVIDERS.map((provider) => this.#reloadAgentEnvironment(provider)));
+  }
+
+  async #reloadAgentEnvironment(provider: AgentProvider): Promise<void> {
+    this.#environmentReloadPending.delete(provider);
+    if (!this.#clients.has(provider)) return;
+    if (this.#hooks.isProviderBusy(provider)) {
+      this.#environmentReloadPending.add(provider);
+      return;
+    }
+    try {
+      await this.#runProviderConnectionCommand(provider, () => this.#reprobeProvider(provider));
+    } catch {
+      // `#reprobeProvider` has already reported the failure on the provider's status.
+      if (this.#hooks.isProviderBusy(provider)) this.#environmentReloadPending.add(provider);
+    }
   }
 
   /**

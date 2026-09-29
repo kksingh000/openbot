@@ -341,6 +341,12 @@ Billing is off, and Stripe receives nothing, when the account service has no Str
   system's secret storage in the same way as provider API keys. One record per server address holds
   the client registration and the access and refresh tokens. Removing the server in settings deletes
   its record. These values are redacted from logs, exports and diagnostics.
+- The GitHub connection (Server settings > Connectors) is kept in
+  `~/Library/Application Support/OpenBot/openbot-github-connector-v1.json`, encrypted by the operating
+  system's secret storage. It holds the GitHub access and refresh tokens and the account name and ID.
+  While the connection is on, `provider-state/github` in the same folder holds the access token in
+  plain text, with mode 0600, for `gh` and `git` in agent tools. OpenBot deletes that folder when you
+  disconnect and when the app closes. The tokens are redacted from logs, exports and diagnostics.
 - `~/Library/Application Support/OpenBot/logs/trace.ndjson` is a local trace of IPC calls,
   provider turns, and main-process failures. Each line holds a time, the IPC channel name, the turn
   origin or the failure origin (`uncaughtException` or `unhandledRejection`), the duration, and the
@@ -384,6 +390,10 @@ Network traffic can also occur when:
   sign-in, OpenBot connects to the server's authorization service to register itself, to exchange
   the grant the browser returns, and to renew the token. Nothing about the user's agents,
   conversations or files is sent in those requests;
+- the user connects GitHub in Server settings. OpenBot asks `github.com` for a sign-in code and a
+  token, renews the token, and reads the account name from `api.github.com`. Agents then reach the
+  GitHub MCP server at `api.githubcopilot.com` and GitHub itself through `gh` and `git`, with that
+  token. The token stays on this computer; the central account service and Cloudflare get nothing;
 - an installed build checks GitHub Releases for updates;
 - OpenBot checks for new provider CLI releases when it starts, once an hour, and when you select
   `Check for updates`. It asks `api.github.com` for Codex, `registry.npmjs.org` for Claude and

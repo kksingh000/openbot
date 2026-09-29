@@ -99,7 +99,7 @@ import { DuplicationGate } from "./agent/duplication-gate";
 import { type AgentHostedSites, HostedSiteCoordinator } from "./agent/hosted-site-coordinator";
 import { ImageGenRuntime } from "./agent/image-gen-runtime";
 import { MailboxSync } from "./agent/mailbox-sync";
-import { McpGateway, type TestMcpServerOptions } from "./agent/mcp-gateway";
+import { type GitHubConnectorSource, McpGateway, type TestMcpServerOptions } from "./agent/mcp-gateway";
 import {
   creationModel,
   type ModelChoice,
@@ -145,7 +145,7 @@ const logger = createOpenBotLogger("agent-service");
  */
 const DEFAULT_BUNDLED_EXECUTABLES: BundledProviderExecutables = { claude: null, grok: null };
 
-export type { TestMcpServerOptions } from "./agent/mcp-gateway";
+export type { GitHubConnectorSource, TestMcpServerOptions } from "./agent/mcp-gateway";
 export type { RoutineMutationOptions } from "./agent/routine-scheduler";
 export type { ResolvedSharedFile } from "./workspace-paths";
 
@@ -199,6 +199,11 @@ export interface AgentServiceOptions {
    * main process, not of this class.
    */
   computerUseMcpServer?: () => McpServerConfig | null;
+  /**
+   * The built-in GitHub connection of this computer, or `null`. Read at each spawn and each hand-off,
+   * for the same reason as `computerUseMcpServer`: the user connects and disconnects while OpenBot runs.
+   */
+  githubConnector?: GitHubConnectorSource | null;
 }
 
 export class AgentService extends EventEmitter<AgentServiceEvents> {
@@ -259,6 +264,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       localSkillTools,
       developmentDefaults = false,
       computerUseMcpServer = () => null,
+      githubConnector = null,
     } = options;
     this.#developmentDefaults = developmentDefaults;
     this.#localSkillTools = localSkillTools;
@@ -269,6 +275,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       servers: new McpServerStore(store.database),
       credentials,
       computerUseMcpServer,
+      githubConnector,
       logger,
       hooks: {
         emitError: (code, error) => this.#emitError(code, error),
@@ -543,6 +550,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       mcpServers: () => this.#mcp.enabled(),
       mcpToolRuntimes: () => this.#mcp.toolRuntimes(),
       mcpAuthorization: (config) => this.#mcp.authorization(config),
+      agentEnvironment: credentials.agentEnvironment,
       hooks: {
         logRecovery: (agentId, provider, outcome) =>
           logger.warn("Recovered an unavailable provider session.", { agentId, provider, outcome }),
@@ -1028,6 +1036,15 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
    */
   notifyComputerUseChanged(): void {
     this.#mcp.changed();
+  }
+
+  /**
+   * GitHub was connected, disconnected or expired. The same treatment as the Computer Use entry,
+   * and the processes that read the `gh` and `git` variables only at spawn start again.
+   */
+  notifyGitHubConnectorChanged(): void {
+    this.#mcp.changed();
+    void this.#providers.reloadAgentEnvironment();
   }
 
   /**

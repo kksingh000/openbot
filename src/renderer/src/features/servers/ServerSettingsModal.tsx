@@ -22,6 +22,7 @@ import {
   Download,
   HardDrive,
   Monitor,
+  Plug,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -31,9 +32,11 @@ import {
   toast,
   UsersRound,
 } from "@openbot/ui";
+import { GitHubConnectorPanel } from "@openbot/ui/features/settings/GitHubConnectorPanel";
 import { SaveBarDock, SettingsDialogShell } from "@openbot/ui/features/settings/SettingsDialogShell";
 import { useText } from "@openbot/ui/text";
 import { createEffect, createSignal, onCleanup, Show, untrack } from "solid-js";
+import type { GitHubConnectorController } from "../connectors/github-connector";
 import { type ServerStorageOptions, ServerStoragePanel } from "../files/ServerStoragePanel";
 import { type HostProviderSettings, HostProviderSettingsPanel } from "../settings/ProviderSettingsSection";
 import type { McpServerConfig, McpTestResult } from "./mcp-servers";
@@ -114,6 +117,11 @@ export interface ServerSettingsModalProps {
   /** The Import section appears only when a caller supplies this: agents import into the local server. */
   agentImport?: ServerImportOptions;
   /**
+   * The Connectors section appears only when a caller supplies this: the GitHub connection belongs
+   * to this computer, so a remote server and a build without a GitHub App pass nothing.
+   */
+  githubConnector?: GitHubConnectorController | undefined;
+  /**
    * The Updates section appears only when a caller supplies this: a remote host with
    * `host-update-v1` that this member administers.
    */
@@ -130,7 +138,8 @@ export type ServerSettingsSection =
   | "storage"
   | "providers"
   | "updates"
-  | "import";
+  | "import"
+  | "connectors";
 type Section = ServerSettingsSection;
 
 const sections = {
@@ -142,6 +151,7 @@ const sections = {
   providers: { title: "server.settings.providersTitle", description: "server.settings.providersDescription" },
   updates: { title: "server.settings.updatesTitle", description: "server.settings.updatesDescription" },
   import: { title: "server.settings.importTitle", description: "server.settings.importDescription" },
+  connectors: { title: "server.settings.connectorsTitle", description: "server.settings.connectorsDescription" },
 } as const satisfies Record<Section, { title: AppTextKey; description: AppTextKey }>;
 
 export function ServerSettingsModal(props: ServerSettingsModalProps) {
@@ -281,7 +291,8 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
         value === "storage" ||
         value === "providers" ||
         value === "updates" ||
-        value === "import"
+        value === "import" ||
+        value === "connectors"
       )
         setSection(value);
     },
@@ -472,6 +483,12 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
                 <span>{t(sections.import.title)}</span>
               </Tabs.Trigger>
             </Show>
+            <Show when={props.githubConnector}>
+              <Tabs.Trigger class="settings-modal-nav-item" value="connectors">
+                <Plug aria-hidden="true" />
+                <span>{t(sections.connectors.title)}</span>
+              </Tabs.Trigger>
+            </Show>
           </Tabs.List>
         }
       >
@@ -539,6 +556,25 @@ export function ServerSettingsModal(props: ServerSettingsModalProps) {
           {(agentImport) => (
             <Tabs.Content value="import" class="settings-modal-tab-panel server-settings-panel" data-tab="import">
               <ServerImportPanel {...agentImport()} />
+            </Tabs.Content>
+          )}
+        </Show>
+        <Show when={props.githubConnector}>
+          {(github) => (
+            <Tabs.Content
+              value="connectors"
+              class="settings-modal-tab-panel server-settings-panel"
+              data-tab="connectors"
+            >
+              <GitHubConnectorPanel
+                status={github().status()}
+                busy={github().busy()}
+                onConnect={github().connect}
+                onCancel={github().cancel}
+                onDisconnect={github().disconnect}
+                onOpenVerification={github().openVerification}
+                onOpenInstall={github().openInstall}
+              />
             </Tabs.Content>
           )}
         </Show>

@@ -35,6 +35,7 @@ import {
   type DiscoverModelsResult,
   decodeScheduledUpdateRestart,
   type ExportResult,
+  type GitHubConnectorStatus,
   type HostedSiteSummary,
   isAgentModel,
   isAgentProvider,
@@ -56,6 +57,7 @@ import {
   type NotificationOpenedEvent,
   type NotificationPreference,
   type ProviderDetectionSettings,
+  parseGitHubConnectorStatus,
   type RemoteDesktopSetupStatus,
   type RemoteDesktopTestStatus,
   UPDATE_PHASES,
@@ -285,6 +287,12 @@ export function decodeHostedSite(value: unknown): HostedSiteSummary {
 export function decodeHostedSites(value: unknown): HostedSiteSummary[] {
   if (!Array.isArray(value)) throw new Error("Invalid hosted site list response.");
   return value.map(decodeHostedSite);
+}
+
+export function decodeGitHubConnectorStatus(value: unknown): GitHubConnectorStatus {
+  const status = parseGitHubConnectorStatus(value);
+  if (!status) throw new Error("Invalid GitHub connector response.");
+  return status;
 }
 
 export function decodeBillingState(value: unknown): BillingState {

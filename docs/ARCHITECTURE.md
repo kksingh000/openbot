@@ -1413,6 +1413,16 @@ and its user settings (see `plans/003-mcp-works-on-a-clean-machine.md`). The pan
 environment values, `src/backend/mcp-redaction.ts` removes them from logs, and OAuth tokens are in
 `safeStorage`.
 
+The GitHub connector is built in and has no SQLite row. `src/main/github-connector-service.ts` signs
+in to the `openbot` GitHub App with the device flow, which needs only the public Client ID, and keeps
+the tokens in `openbot-github-connector-v1.json`, encrypted with `safeStorage`. While it is
+connected, `McpGateway.enabled()` adds the `openbot-github` server (`api.githubcopilot.com/mcp/`),
+and `authorization()` gives it a fresh token at each hand-off. An enabled server that the user added
+with the name `github` wins. For `gh` and `git`, the service writes the token to
+`<userData>/provider-state/github` (mode 0600), and each provider gets `GH_CONFIG_DIR` and a
+`GIT_CONFIG_*` credential helper that reads that file. The environment holds only paths, never the
+token. Codex gets these values through `shell_environment_policy.set` in the thread config.
+
 ## Local skill library
 
 `src/main/local-skill-library.ts` owns immutable revisions under the application's user-data directory, in `local-skills/<local-skill-uuid>/<revision>/bundle.zip`. A staging directory is renamed only after the bundle is written; reads ignore unpublished staging directories. Revisions are serialized and checked against the caller's expected revision. No SQLite migration is required.

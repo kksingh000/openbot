@@ -74,6 +74,7 @@ import {
   decodeDetectedModelServers,
   decodeDiscoverModelsResult,
   decodeExportResult,
+  decodeGitHubConnectorStatus,
   decodeHostedServer,
   decodeHostedServerCatalog,
   decodeHostedServerList,
@@ -532,6 +533,15 @@ const openbotApi: OpenBotDesktopApi = {
     publish: decodeHostedSite,
     replace: decodeHostedSite,
     delete: decodeVoid,
+  }),
+  githubConnector: bridgeGroup(IPC_ENDPOINTS.githubConnector, {
+    status: decodeGitHubConnectorStatus,
+    connect: decodeGitHubConnectorStatus,
+    cancel: decodeGitHubConnectorStatus,
+    disconnect: decodeGitHubConnectorStatus,
+    openVerification: decodeVoid,
+    openInstall: decodeVoid,
+    changed: decodeGitHubConnectorStatus,
   }),
   billing: bridgeGroup(IPC_ENDPOINTS.billing, {
     getState: decodeBillingState,

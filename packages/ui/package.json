@@ -145,6 +145,7 @@
     "./features/servers/ServerRail": "./src/features/servers/ServerRail.tsx",
     "./features/settings/AccountProfilePanel": "./src/features/settings/AccountProfilePanel.tsx",
     "./features/settings/AgentSelect": "./src/features/settings/AgentSelect.tsx",
+    "./features/settings/GitHubConnectorPanel": "./src/features/settings/GitHubConnectorPanel.tsx",
     "./features/settings/LanguageSelect": "./src/features/settings/LanguageSelect.tsx",
     "./features/settings/MarketplaceCatalog": "./src/features/settings/MarketplaceCatalog.tsx",
     "./features/settings/MarketplaceDetail": "./src/features/settings/MarketplaceDetail.tsx",

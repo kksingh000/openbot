@@ -97,6 +97,7 @@ import { createMockAuth, type MockAuthOptions } from "./mock-auth";
 import { createMockBilling } from "./mock-billing";
 import { createMockBrowser, type MockBrowserOptions } from "./mock-browser";
 import { createMockChannels } from "./mock-channels";
+import { createMockGitHubConnector } from "./mock-github-connector";
 import { createMockHostUpdate, type MockHostUpdateOptions } from "./mock-host-update";
 import { createMockHostedServers } from "./mock-hosted-servers";
 import { createMockProviderRuntimes, type MockProviderRuntimeOptions } from "./mock-provider-runtimes";
@@ -559,6 +560,7 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
         hostedSites = hostedSites.filter((site) => site.id !== siteId);
       },
     },
+    githubConnector: createMockGitHubConnector(),
     billing: createMockBilling(),
     hostedServers: createMockHostedServers(),
     customProviders: {

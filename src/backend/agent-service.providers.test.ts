@@ -8,6 +8,9 @@ import {
   type AgentEvent,
   COMPUTER_USE_MCP_SERVER_ID,
   COMPUTER_USE_MCP_SERVER_NAME,
+  GITHUB_CONNECTOR_MCP_SERVER_ID,
+  GITHUB_CONNECTOR_MCP_SERVER_NAME,
+  GITHUB_CONNECTOR_MCP_SERVER_URL,
   type McpServerConfig,
 } from "@openbot/contracts/ipc";
 import { isDynamicRecord } from "@openbot/contracts/runtime-values";
@@ -502,6 +505,61 @@ describe.sequential("AgentService: providers", () => {
       tools: CODEX_TOOLS,
       mcp_servers: {
         "Signed in": { url: "https://mcp.example.com/mcp", http_headers: { Authorization: `Bearer ${token}` } },
+      },
+    });
+    const reported = events.filter((event) => event.type === "error");
+    expect(reported.length).toBeGreaterThan(0);
+    for (const event of reported) expect(event.message).not.toContain(token);
+    expect(service.listQueue("chief").deliveries.at(-1)?.error ?? "").not.toContain(token);
+  });
+
+  /* The GitHub connection is not an MCP sign-in and has no row, so only the hand-off record can
+     name its token. A leak here gives the user's GitHub account to whoever reads the error. */
+  it("hands the GitHub connection's token to its built-in server and keeps it out of the error it causes", async () => {
+    const { store, mailbox } = stores(root);
+    // No known token prefix: only the registration that the hand-off makes can redact it.
+    const token = "connector-opaque-token-0123456789";
+    const client = new FakeAgentClient("codex", "CODEX_DONE", true, true, {}, async (method) => {
+      if (method === "turn/start") throw new Error(`GitHub MCP refused ${token}`);
+    });
+    const events: AgentEvent[] = [];
+    service = createTestService({
+      store,
+      mailbox,
+      preferredProvider: "codex",
+      clientFactory: () => client,
+      credentials: { apiKey: () => null, customProviders: () => [], mcpServers: () => [] },
+      githubConnector: {
+        mcpServer: () => ({
+          id: GITHUB_CONNECTOR_MCP_SERVER_ID,
+          name: GITHUB_CONNECTOR_MCP_SERVER_NAME,
+          transport: "http",
+          enabled: true,
+          command: "",
+          args: [],
+          env: [],
+          envPassthrough: [],
+          workingDirectory: "",
+          url: GITHUB_CONNECTOR_MCP_SERVER_URL,
+          headers: [],
+        }),
+        accessToken: async () => token,
+      },
+    });
+    service.on("event", (event) => events.push(event));
+    await service.initialize();
+
+    await service.sendMessage({ agentId: "chief", text: "Start." });
+    await waitForQueue(service, "chief", (queue) => queue.deliveries.every((delivery) => delivery.status === "failed"));
+
+    const starts = client.requests.filter((request) => request.method === "thread/start");
+    const servers = paramsRecord(starts.at(-1)?.params)?.config;
+    expect(servers).toMatchObject({
+      mcp_servers: {
+        [GITHUB_CONNECTOR_MCP_SERVER_NAME]: {
+          url: GITHUB_CONNECTOR_MCP_SERVER_URL,
+          http_headers: { Authorization: `Bearer ${token}` },
+        },
       },
     });
     const reported = events.filter((event) => event.type === "error");

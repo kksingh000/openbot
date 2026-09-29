@@ -96,6 +96,9 @@ import {
 } from "./development-remote-bootstrap";
 import { performDynamicIslandCriticalAction } from "./dynamic-island-actions";
 import { DynamicIslandWindowController } from "./dynamic-island-window";
+import { githubAppConfig } from "./github-connector-config";
+import { GitHubConnectorService } from "./github-connector-service";
+import { GitHubConnectorStore } from "./github-connector-store";
 import { HostService } from "./host-service";
 import { HostUpdateCoordinator } from "./host-update-coordinator";
 import { CLIENT_USE_WINDOW_MS, HostedServerActivity } from "./hosted-server-activity";
@@ -182,6 +185,8 @@ const CUSTOM_PROVIDERS_FILE = "openbot-custom-providers-v1.json";
 const PROVIDER_CREDENTIAL_FILE = "openbot-provider-credentials-v1.json";
 /** The MCP sign-ins. Separate from the keys above: a key is typed by the user, a token is not. */
 const MCP_OAUTH_FILE = "openbot-mcp-oauth-v1.json";
+/** The one GitHub sign-in of this computer, with the same cipher as the MCP sign-ins. */
+const GITHUB_CONNECTOR_FILE = "openbot-github-connector-v1.json";
 
 /**
  * Where each service stops, as a position in the shutdown sequence rather than a position in the
@@ -218,6 +223,8 @@ const TEARDOWN_ORDER = {
   host: 90,
   teamWebRtcBridge: 100,
   mcpOAuthRedirect: 105,
+  // Before the agent service, so no agent is handed a token file that is being removed.
+  githubConnector: 107,
   service: 110,
   // Last, so the turns that end while the services stop are still written.
   trace: 120,
@@ -255,6 +262,7 @@ export interface ApplicationServices {
   providerCredentials: ProviderCredentialStore;
   /** Reached by the entry point for one thing only: handing a returning grant to its sign-in. */
   mcpOAuth: McpOAuth;
+  githubConnector: GitHubConnectorService;
   mailbox: MailboxStore;
   storageUsage: StorageUsageService;
   browser: BrowserHost;
@@ -638,6 +646,19 @@ export async function createApplicationServices({
     redirectUrl: mcpOAuthRedirect?.redirectUrl ?? MCP_OAUTH_REDIRECT_URL,
   });
   mcpOAuthAuthority = mcpOAuth;
+  /*
+   * The built-in GitHub connection. Loaded before the agent service, because the first spawn reads
+   * its MCP server and its `gh` and `git` files. An unreadable file is logged by the service and
+   * treated as no sign-in.
+   */
+  const githubConnector = new GitHubConnectorService({
+    app: githubAppConfig(),
+    store: new GitHubConnectorStore(join(app.getPath("userData"), GITHUB_CONNECTOR_FILE), secretCipher),
+    toolDirectory: join(app.getPath("userData"), "provider-state", "github"),
+    openExternal: (url) => shell.openExternal(url),
+  });
+  await githubConnector.load();
+  teardown.push(TEARDOWN_ORDER.githubConnector, "the GitHub connection", () => githubConnector.dispose());
   const tables = new AgentTables({
     sharedRoot: store.sharedRoot,
     supervisor: new AgentDatabaseSupervisor({ spawnHost: spawnAgentDatabaseHost }),
@@ -780,17 +801,22 @@ export async function createApplicationServices({
       // service asks for one at each hand-off; only a test the user pressed may open a browser.
       mcpOAuth,
       providerStateDirectory: join(app.getPath("userData"), "provider-state"),
+      // Paths only: `gh` and `git` read the token from the files the connection keeps current.
+      agentEnvironment: (inherited) => githubConnector.agentEnvironment(inherited),
     },
     // Appended to the stored servers at each spawn, so the same tools reach Codex, Claude and the
     // ACP providers. Null until the daemon runs, which is what keeps a machine with no driver from
     // handing every provider a command it cannot start.
     computerUseMcpServer: () => cuaDriver.mcpServerForProviders(),
+    githubConnector,
     localSkillTools: () => localSkillTools(skills),
     approvalAutomation,
     deleteWithRevokedApproval: (agentId, remove) => approvalAutomation.deleteAgent(agentId, remove),
     tables,
   });
   teardown.push(TEARDOWN_ORDER.service, "the agent service", () => service.stop());
+  // A connect, a disconnect or an expiry changes the tools and the `gh` sign-in of every agent.
+  githubConnector.onAgentAccessChanged(() => service.notifyGitHubConnectorChanged());
   // The capability and the tool list both follow the daemon, and nothing else can tell them: no
   // provider probe reaches the driver, because the driver is this process's child.
   // The held state first: the providers start at `unavailable`, and a listener hears only what
@@ -1392,6 +1418,7 @@ export async function createApplicationServices({
     providerRuntimes,
     providerCredentials,
     mcpOAuth,
+    githubConnector,
     mailbox,
     storageUsage,
     browser,
