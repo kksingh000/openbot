@@ -1,5 +1,5 @@
 {
-  "name": "openbot",
+  "name": "OpenBotGit",
   "url": "https://github.com/nightly-labs/openbot",
   "description": "Gives OpenBot agents your repositories, issues and pull requests, through the GitHub MCP server, gh and git. The sign-in stays on the computer that runs OpenBot.",
   "public": true,

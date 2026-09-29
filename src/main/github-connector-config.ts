@@ -3,9 +3,9 @@
 // `bun scripts/create-github-app.ts` creates the app and prints its Client ID. A Client ID is
 // public: device flow and refresh need nothing else, and the client secret never ships.
 
-/** Empty until the GitHub App "openbot" exists. With no Client ID, the connection is not offered. */
-export const GITHUB_APP_CLIENT_ID = "";
-export const GITHUB_APP_SLUG = "openbot";
+/** The GitHub App "OpenBotGit" of `nightly-labs`. With no Client ID, the connection is not offered. */
+export const GITHUB_APP_CLIENT_ID = "Iv23lik5pzHz70cb0RUL";
+export const GITHUB_APP_SLUG = "openbotgit";
 
 export interface GitHubAppConfig {
   clientId: string;

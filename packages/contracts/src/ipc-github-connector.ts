@@ -1,7 +1,7 @@
 import { isBoolean, isDynamicRecord, isString } from "./runtime-values";
 
 /**
- * The built-in GitHub connection of this computer. One sign-in to the GitHub App "openbot", shared
+ * The built-in GitHub connection of this computer. One sign-in to the GitHub App "OpenBotGit", shared
  * by every agent on this computer. The token never crosses to the renderer.
  *
  * - `disconnected`: no sign-in is stored.

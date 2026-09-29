@@ -195,7 +195,7 @@ async function main(): Promise<void> {
   logger.info("Do these steps in the app settings. A manifest cannot do them:");
   logger.info("  1. General > Identifying and authorizing users: select Enable Device Flow.");
   logger.info("  2. General > Optional features: keep User-to-server token expiration on.");
-  if (conversion.slug !== "openbot") {
+  if (conversion.slug !== "openbotgit") {
     logger.info(`GitHub gave the slug ${conversion.slug}. Put it in GITHUB_APP_SLUG too.`);
   }
 }
