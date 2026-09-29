@@ -53,6 +53,8 @@ export class GitHubBotTokens {
   #byRepository = new Map<string, GitHubBotToken>();
   /** When the next request is due. */
   #nextAt = 0;
+  /** Increased by `clear`, so that an answer for the account before it is not kept. */
+  #epoch = 0;
   #failureLogged = false;
 
   constructor(options: GitHubBotTokensOptions) {
@@ -88,14 +90,15 @@ export class GitHubBotTokens {
   clear(): void {
     this.#byRepository = new Map();
     this.#nextAt = 0;
+    this.#epoch += 1;
   }
 
   /**
-   * Replaces the set with the API's answer. Returns whether the set changed. A failure keeps the
-   * tokens that are still valid and does not reject.
+   * Replaces the set with the API's answer. A failure keeps the tokens that are still valid and
+   * does not reject. An answer that arrives after `clear` is discarded.
    */
-  async renew(userToken: string, signal?: AbortSignal): Promise<boolean> {
-    const before = this.#signature();
+  async renew(userToken: string, signal?: AbortSignal): Promise<void> {
+    const epoch = this.#epoch;
     try {
       const response = await this.#fetch(new URL("/v1/github/installation-tokens", this.#apiUrl).toString(), {
         method: "POST",
@@ -104,14 +107,16 @@ export class GitHubBotTokens {
           ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)])
           : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
+      if (epoch !== this.#epoch) return;
       if (response.status === 503) {
         // This API has no app key: agents act as the user until it does.
         this.#byRepository = new Map();
         this.#nextAt = this.#now() + RETRY_MS;
-        return before !== this.#signature();
+        return;
       }
       if (!response.ok) throw new Error(`The OpenBot API refused the GitHub token request (HTTP ${response.status}).`);
       const answer = answerSchema.parse(await response.json());
+      if (epoch !== this.#epoch) return;
       const next = new Map<string, GitHubBotToken>();
       for (const installation of answer.installations) {
         const expiresAt = Date.parse(installation.expiresAt);
@@ -126,8 +131,11 @@ export class GitHubBotTokens {
       this.#nextAt = next.size > 0 ? firstExpiry - RENEW_MARGIN_MS : this.#now() + RETRY_MS;
       this.#failureLogged = false;
     } catch (error) {
-      if (signal?.aborted) return false;
-      this.#nextAt = this.#now() + RETRY_MS;
+      if (signal?.aborted || epoch !== this.#epoch) return;
+      // Due again when the first token ends, so that the caller removes it from its files.
+      const now = this.#now();
+      const expiries = [...this.#byRepository.values()].map((entry) => entry.expiresAt).filter((at) => at > now);
+      this.#nextAt = Math.min(now + RETRY_MS, ...expiries);
       if (!this.#failureLogged) {
         this.#failureLogged = true;
         logger.warn("The GitHub App tokens could not be renewed. Agents act on GitHub as the signed-in user.", {
@@ -135,13 +143,5 @@ export class GitHubBotTokens {
         });
       }
     }
-    return before !== this.#signature();
-  }
-
-  #signature(): string {
-    return this.entries()
-      .map(([repository, token]) => `${repository}\u0000${token}`)
-      .sort()
-      .join("\u0001");
   }
 }

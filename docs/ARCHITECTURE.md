@@ -1457,7 +1457,7 @@ environment values, `src/backend/mcp-redaction.ts` removes them from logs, and O
 `safeStorage`.
 
 The GitHub connector is built in and has no SQLite row. `src/main/github-connector-service.ts` signs
-in to the `openbot` GitHub App with the device flow, which needs only the public Client ID, and keeps
+in to the `openbotgit` GitHub App with the device flow, which needs only the public Client ID, and keeps
 the tokens in `openbot-github-connector-v1.json`, encrypted with `safeStorage`. While it is
 connected, `McpGateway.enabled()` adds the `openbot-github` server (`api.githubcopilot.com/mcp/`),
 and `authorization()` gives it a fresh bearer at each hand-off. An enabled server that the user added
@@ -1481,6 +1481,10 @@ administer, and stores nothing. With no key it answers 503, and the desktop keep
   token. The port and the secret stay in the encrypted record, so a resumed Codex session keeps its
   URL and header.
 - `gh` has one token for each host, so it acts as the user.
+
+A pull request that an agent opens with a bot token has `openbotgit[bot]` as its author, so the user
+who asked for it can approve it. A branch rule that needs one approval then passes with no second
+person.
 
 ## Local skill library
 

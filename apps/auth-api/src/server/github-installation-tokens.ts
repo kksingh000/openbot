@@ -100,23 +100,39 @@ export class GitHubInstallationTokens {
     // `/user/installations` lists the installations of the app that issued the user token. A token
     // from another app lists that app's installations, which this app has no token for.
     for (const installation of installations.filter((entry) => entry.app_id === appId).slice(0, MAX_INSTALLATIONS)) {
-      const writable = await this.#writableRepositories(installation.id, user);
-      for (let start = 0; start < writable.length; start += MAX_REPOSITORIES_PER_TOKEN) {
-        const part = writable.slice(start, start + MAX_REPOSITORIES_PER_TOKEN);
-        const minted = await this.#post(
-          `/app/installations/${installation.id}/access_tokens`,
-          APP,
-          { repository_ids: part.map((repository) => repository.id) },
-          accessTokenSchema,
-        );
-        tokens.push({
-          installationId: installation.id,
-          account: installation.account.login,
-          token: minted.token,
-          expiresAt: minted.expires_at,
-          repositories: part.map((repository) => repository.fullName),
-        });
+      try {
+        tokens.push(...(await this.#issueForInstallation(installation.id, installation.account.login, user)));
+      } catch (error) {
+        // GitHub can refuse one installation, as for an organization with SAML SSO or a suspended
+        // app. The other installations still get their tokens.
+        if (!(error instanceof GitHubInstallationTokensError && error.code === "github_failed")) throw error;
       }
+    }
+    return tokens;
+  }
+
+  async #issueForInstallation(
+    installationId: number,
+    account: string,
+    user: Credential,
+  ): Promise<GitHubInstallationToken[]> {
+    const writable = await this.#writableRepositories(installationId, user);
+    const tokens: GitHubInstallationToken[] = [];
+    for (let start = 0; start < writable.length; start += MAX_REPOSITORIES_PER_TOKEN) {
+      const part = writable.slice(start, start + MAX_REPOSITORIES_PER_TOKEN);
+      const minted = await this.#post(
+        `/app/installations/${installationId}/access_tokens`,
+        APP,
+        { repository_ids: part.map((repository) => repository.id) },
+        accessTokenSchema,
+      );
+      tokens.push({
+        installationId,
+        account,
+        token: minted.token,
+        expiresAt: minted.expires_at,
+        repositories: part.map((repository) => repository.fullName),
+      });
     }
     return tokens;
   }

@@ -6,7 +6,7 @@ import { z } from "zod";
 import { writeJsonFileAtomically } from "../backend/atomic-json-file";
 import type { SecretCipher } from "./provider-credential-store";
 
-export const githubConnectorRecordSchema = z.object({
+const githubConnectorRecordSchema = z.object({
   accessToken: z.string().min(1),
   accessTokenExpiresAt: z.number().nullable(),
   refreshToken: z.string().min(1).nullable(),

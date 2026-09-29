@@ -15,8 +15,8 @@ import {
   ItemDescription,
   ItemGroup,
   ItemTitle,
+  OctagonX,
   SettingsSection,
-  ShieldCheck,
   Text,
 } from "@openbot/ui";
 import { For, Match, Show, Switch } from "solid-js";
@@ -42,18 +42,19 @@ export interface GitHubConnectorPanelProps {
  * component: the status holds the account name and, during a sign-in, the code that the user types.
  */
 export function GitHubConnectorPanel(props: GitHubConnectorPanelProps) {
-  const { t } = useText();
+  const { t, sourceText } = useText();
   return (
     <SettingsSection title={t("connector.github.title")} description={t("connector.github.description")}>
-      <Show when={props.status.error}>
+      {/* The expired row already tells the user why. */}
+      <Show when={props.status.state !== "expired" && props.status.error}>
         {(message) => (
           <Alert tone="danger" role="alert">
             <AlertIcon>
-              <ShieldCheck />
+              <OctagonX />
             </AlertIcon>
             <AlertContent>
               <AlertTitle>{t("connector.github.actionFailed")}</AlertTitle>
-              <AlertDescription>{message()}</AlertDescription>
+              <AlertDescription>{sourceText(message())}</AlertDescription>
             </AlertContent>
           </Alert>
         )}

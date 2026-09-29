@@ -1,18 +1,14 @@
-import type { GitHubConnectorDesktopApi, GitHubConnectorStatus } from "@openbot/contracts/ipc";
+import {
+  DISCONNECTED_GITHUB_CONNECTOR,
+  type GitHubConnectorDesktopApi,
+  type GitHubConnectorStatus,
+} from "@openbot/contracts/ipc";
 
 /** How long the mock waits for GitHub's code, and then for the user to type it on github.com. */
 const MOCK_CODE_MS = 800;
 const MOCK_SIGN_IN_MS = 4_000;
 
-const DISCONNECTED: GitHubConnectorStatus = {
-  available: true,
-  state: "disconnected",
-  login: null,
-  avatarUrl: null,
-  userCode: null,
-  verificationUri: null,
-  error: null,
-};
+const DISCONNECTED: GitHubConnectorStatus = { ...DISCONNECTED_GITHUB_CONNECTOR, available: true };
 
 /**
  * Starts disconnected. Connect waits for a code as the real one does, shows it, and after a few

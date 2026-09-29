@@ -12,8 +12,6 @@ import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.j
 import {
   CallToolRequestSchema,
   GetPromptRequestSchema,
-  type JSONRPCMessage,
-  JSONRPCMessageSchema,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListResourceTemplatesRequestSchema,
@@ -22,6 +20,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { isDynamicRecord, isString } from "@openbot/contracts/runtime-values";
 import { createOpenBotLogger, toLogValue } from "@openbot/logging";
+import { readJsonBody } from "../backend/local-mcp-bridge";
 
 const logger = createOpenBotLogger("github-mcp-proxy");
 
@@ -33,7 +32,7 @@ export interface GitHubMcpProxyOptions {
   /** GitHub's remote MCP server. */
   upstreamUrl: string;
   /** The bearer that agents send. It stays the same across restarts, so a resumed session keeps working. */
-  secret: string;
+  secret: () => string;
   /** The user token, or null while the connection is not active. */
   userToken: () => Promise<string | null>;
   /** The bot token of `owner/name`, or null when the user token applies. */
@@ -148,7 +147,7 @@ export class GitHubMcpProxy {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     try {
       await mcp.connect(transport);
-      await transport.handleRequest(request, response, await readJsonBody(request));
+      await transport.handleRequest(request, response, await readJsonBody(request, MAX_BODY_BYTES));
     } catch {
       if (!response.headersSent) {
         response.writeHead(500, { "content-type": "application/json" });
@@ -218,11 +217,12 @@ export class GitHubMcpProxy {
 
   /** One call on the client of `token`. A session that GitHub ended opens again once. */
   async #call<T>(token: string, call: (client: Client) => Promise<T>): Promise<T> {
+    const client = await this.#upstream(token);
     try {
-      return await call(await this.#upstream(token));
+      return await call(client);
     } catch (error) {
       if (!(error instanceof StreamableHTTPError && error.code === 404)) throw error;
-      this.#drop(token);
+      this.#drop(token, client);
       return call(await this.#upstream(token));
     }
   }
@@ -240,48 +240,29 @@ export class GitHubMcpProxy {
     try {
       await upstream.ready;
     } catch (error) {
-      this.#drop(token);
+      this.#drop(token, upstream.client);
       throw error;
     }
     return upstream.client;
   }
 
-  #drop(token: string): void {
+  /** Closes `client` only while it is the client of `token`: a parallel call can have opened a new one. */
+  #drop(token: string, client: Client): void {
     const upstream = this.#upstreams.get(token);
-    if (!upstream) return;
+    if (upstream?.client !== client) return;
     this.#upstreams.delete(token);
-    void upstream.client.close().catch(() => undefined);
+    void client.close().catch(() => undefined);
   }
 
   #authorized(request: IncomingMessage): boolean {
     const header = request.headers.authorization;
     if (!header?.startsWith("Bearer ")) return false;
     const candidate = Buffer.from(header.slice("Bearer ".length));
-    const secret = Buffer.from(this.#options.secret);
+    const secret = Buffer.from(this.#options.secret());
     return candidate.length === secret.length && timingSafeEqual(candidate, secret);
   }
 }
 
 function requestOptions(signal: AbortSignal): RequestOptions {
   return { signal, timeout: UPSTREAM_TIMEOUT_MS, resetTimeoutOnProgress: true };
-}
-
-async function readJsonBody(request: IncomingMessage): Promise<JSONRPCMessage | JSONRPCMessage[] | undefined> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new Error("The MCP request body is too large.");
-    chunks.push(buffer);
-  }
-  if (size === 0) return undefined;
-  const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  return Array.isArray(value) ? value.map(parseMessage) : parseMessage(value);
-}
-
-function parseMessage(value: unknown): JSONRPCMessage {
-  const parsed = JSONRPCMessageSchema.safeParse(value);
-  if (!parsed.success) throw new Error("The MCP request is not a JSON-RPC message.");
-  return parsed.data;
 }

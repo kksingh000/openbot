@@ -7,7 +7,7 @@
 import { sourceText } from "@openbot/i18n/source";
 import { z } from "zod";
 
-export const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
+const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
 export const GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token";
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 /** GitHub asks for this much more wait after each `slow_down`. */

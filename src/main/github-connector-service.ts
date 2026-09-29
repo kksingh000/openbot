@@ -129,6 +129,8 @@ export class GitHubConnectorService {
   #agentAccess = false;
   readonly #botTokens: GitHubBotTokens;
   #renewingBotTokens: Promise<void> | null = null;
+  /** The content of the repositories file, or null when it is not there. */
+  #repositoriesWritten: string | null = null;
   /** Null when the loopback server could not start: agents then reach GitHub's server with the user token. */
   #mcpProxy: GitHubMcpProxy | null = null;
   /** Generated at the first start, then kept in the record. */
@@ -164,7 +166,10 @@ export class GitHubConnectorService {
         this.#expired = true;
         await this.#removeToolFiles();
       } else {
-        await this.#writeToolFiles(record);
+        // A file that cannot be written must not stop the app. The next refresh writes it again.
+        await this.#writeToolFiles(record).catch((error: unknown) => {
+          logger.warn("The GitHub token files could not be written.", { cause: toLogValue(error) });
+        });
       }
     });
     this.#agentAccess = this.#agentConnected();
@@ -444,7 +449,10 @@ export class GitHubConnectorService {
         this.#expired = false;
         this.#error = null;
         this.#botTokens.clear();
-        await this.#writeToolFiles(record);
+        // The sign-in is stored: the MCP server works without the files, so a write failure does not undo it.
+        await this.#writeToolFiles(record).catch((error: unknown) => {
+          logger.warn("The GitHub token files could not be written.", { cause: toLogValue(error) });
+        });
         return true;
       });
       if (!committed) return;
@@ -547,12 +555,14 @@ export class GitHubConnectorService {
     const generation = this.#generation;
     const userToken = await this.accessToken();
     if (!userToken) return;
-    const changed = await this.#botTokens.renew(userToken);
-    if (!changed) return;
-    await this.#serialize(async () => {
-      if (this.#disposed || this.#generation !== generation || !this.#agentConnected()) return;
+    await this.#botTokens.renew(userToken);
+    // Also after a failure: a token that expired while the API was not reachable leaves the file.
+    const current = await this.#serialize(async () => {
+      if (this.#disposed || this.#generation !== generation || !this.#agentConnected()) return false;
       await this.#writeRepositoriesFile();
+      return true;
     });
+    if (!current) return;
     this.#mcpProxy?.retain(new Set([userToken, ...this.#botTokens.entries().map(([, token]) => token)]));
   }
 
@@ -665,9 +675,15 @@ export class GitHubConnectorService {
     return join(this.#toolDirectory, "repositories");
   }
 
+  /** Writes only a change: a renewal runs each 15 minutes while the API is not reachable. */
   async #writeRepositoriesFile(): Promise<void> {
-    const lines = this.#botTokens.entries().map(([repository, token]) => `${repository}\t${token}\n`);
-    await writeFileAtomically(this.#repositoriesFile(), lines.join(""));
+    const content = this.#botTokens
+      .entries()
+      .map(([repository, token]) => `${repository}\t${token}\n`)
+      .join("");
+    if (content === this.#repositoriesWritten) return;
+    await writeFileAtomically(this.#repositoriesFile(), content);
+    this.#repositoriesWritten = content;
   }
 
   /**
@@ -681,21 +697,27 @@ export class GitHubConnectorService {
     }
     const proxy = new GitHubMcpProxy({
       upstreamUrl: GITHUB_CONNECTOR_MCP_SERVER_URL,
-      secret: this.#mcpProxySecret,
+      secret: () => this.#mcpProxySecret,
       userToken: () => this.accessToken(),
       botToken: (owner, name) => this.#botTokens.forRepository(owner, name),
     });
+    let port: number;
     try {
-      await proxy.start(record?.mcpProxy?.port ?? null);
+      port = await proxy.start(record?.mcpProxy?.port ?? null);
     } catch (error) {
       logger.warn("The GitHub MCP server of this computer did not start.", { cause: toLogValue(error) });
       return;
     }
     this.#mcpProxy = proxy;
-    const settings = this.#mcpProxySettings();
-    if (record && settings && record.mcpProxy?.port !== settings.port) {
-      await this.#store.write({ ...record, mcpProxy: settings });
+    if (!record || record.mcpProxy?.port === port) return;
+    if (record.mcpProxy) {
+      // Resumed sessions send the old secret to the old port, where another program now listens.
+      this.#mcpProxySecret = randomBytes(32).toString("base64url");
+      registerSecretValue(this.#mcpProxySecret);
     }
+    await this.#store.write({ ...record, mcpProxy: this.#mcpProxySettings() }).catch((error: unknown) => {
+      logger.warn("The GitHub MCP server port could not be saved.", { cause: toLogValue(error) });
+    });
   }
 
   #mcpProxySettings(): GitHubConnectorRecord["mcpProxy"] {
@@ -729,6 +751,7 @@ export class GitHubConnectorService {
   }
 
   async #removeToolFiles(): Promise<void> {
+    this.#repositoriesWritten = null;
     await rm(this.#toolDirectory, { recursive: true, force: true }).catch((error: unknown) => {
       logger.warn("The GitHub token files could not be removed.", { cause: toLogValue(error) });
     });

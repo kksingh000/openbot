@@ -145,7 +145,7 @@ const logger = createOpenBotLogger("agent-service");
  */
 const DEFAULT_BUNDLED_EXECUTABLES: BundledProviderExecutables = { claude: null, grok: null };
 
-export type { GitHubConnectorSource, TestMcpServerOptions } from "./agent/mcp-gateway";
+export type { TestMcpServerOptions } from "./agent/mcp-gateway";
 export type { RoutineMutationOptions } from "./agent/routine-scheduler";
 export type { ResolvedSharedFile } from "./workspace-paths";
 
